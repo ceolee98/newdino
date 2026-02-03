@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>재고관리 시스템 v4 - 메뉴 확정</title>
+  <title>재고관리 시스템 555</title>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -256,121 +256,11 @@
     }
 
     // 초기 데이터 (실제 업무 기반 샘플 30개)
+    // 초기 데이터 (vendors만 Supabase 사용, 나머지는 나중에)
     const initData = () => {
-      // 강종코드
-      if (!storage.get('steeltypes')) {
-        storage.set('steeltypes', [
-          { id: 'ST0', code: '0', name: '형강' },
-          { id: 'ST1', code: '1', name: '철판' },
-          { id: 'ST2', code: '2', name: '일반' }
-        ]);
-      }
-      
-      // 업체코드 (15개)
-      if (!storage.get('vendors')) {
-        storage.set('vendors', [
-          { id: 'V1', code: 'VEN-001', name: '다다철강', steeltype: '0', tel: '051-123-4567', person: '김철수', active: true },
-          { id: 'V2', code: 'VEN-002', name: '포스코', steeltype: '1', tel: '054-220-0114', person: '이영희', active: true },
-          { id: 'V3', code: 'VEN-003', name: '현대제철', steeltype: '1', tel: '02-3464-7114', person: '박민수', active: true },
-          { id: 'V4', code: 'VEN-004', name: '동국제강', steeltype: '1', tel: '051-620-7114', person: '최지은', active: true },
-          { id: 'V5', code: 'VEN-005', name: '세아베스틸', steeltype: '0', tel: '032-830-5500', person: '정민호', active: true },
-          { id: 'V6', code: 'VEN-006', name: '대한제강', steeltype: '0', tel: '051-330-8000', person: '강수진', active: true },
-          { id: 'V7', code: 'VEN-007', name: '동부제철', steeltype: '1', tel: '055-320-8200', person: '윤재훈', active: true },
-          { id: 'V8', code: 'VEN-008', name: '고려제강', steeltype: '0', tel: '041-539-8000', person: '임수빈', active: true },
-          { id: 'V9', code: 'VEN-009', name: '삼표산업', steeltype: '2', tel: '02-460-7200', person: '서정우', active: true },
-          { id: 'V10', code: 'VEN-010', name: '부산철강', steeltype: '0', tel: '051-803-6000', person: '한지민', active: true },
-          { id: 'V11', code: 'VEN-011', name: '영풍', steeltype: '1', tel: '02-3772-3000', person: '오승환', active: true },
-          { id: 'V12', code: 'VEN-012', name: '태광산업', steeltype: '0', tel: '051-520-0500', person: '배수지', active: true },
-          { id: 'V13', code: 'VEN-013', name: 'KG동부제철', steeltype: '1', tel: '02-6207-0114', person: '조인성', active: true },
-          { id: 'V14', code: 'VEN-014', name: '한국철강', steeltype: '0', tel: '051-460-8000', person: '김태희', active: true },
-          { id: 'V15', code: 'VEN-015', name: '유니온스틸', steeltype: '1', tel: '055-370-9000', person: '이병헌', active: true }
-        ]);
-      }
-      
-      // 프로젝트 (10개)
-      if (!storage.get('projects')) {
-        storage.set('projects', [
-          { id: 'P1', code: 'S-2025-001', name: 'A호선', active: true },
-          { id: 'P2', code: 'S-2025-002', name: 'B호선', active: true },
-          { id: 'P3', code: 'S-2025-003', name: 'C동 신축', active: true },
-          { id: 'P4', code: 'S-2025-004', name: '공장 증축', active: true },
-          { id: 'P5', code: 'S-2025-005', name: '다리 보수', active: true },
-          { id: 'P6', code: 'S-2025-006', name: 'D블록 공사', active: true },
-          { id: 'P7', code: 'S-2025-007', name: 'E빌딩', active: true },
-          { id: 'P8', code: 'S-2025-008', name: '항만 시설', active: true },
-          { id: 'P9', code: 'S-2025-009', name: '저장 창고', active: true },
-          { id: 'P10', code: 'S-2025-010', name: '사무동 개보수', active: true }
-        ]);
-      }
-      
-      // 창고코드 (8개)
-      if (!storage.get('warehouses')) {
-        storage.set('warehouses', [
-          { id: 'W1', code: 'WH-001', name: '본사창고', active: true },
-          { id: 'W2', code: 'WH-002', name: '부산창고', active: true },
-          { id: 'W3', code: 'WH-003', name: '인천창고', active: true },
-          { id: 'W4', code: 'WH-004', name: '광양창고', active: true },
-          { id: 'W5', code: 'WH-005', name: '울산창고', active: true },
-          { id: 'W6', code: 'WH-006', name: '포항창고', active: true },
-          { id: 'W7', code: 'WH-007', name: '현장 야적장', active: true },
-          { id: 'W8', code: 'WH-008', name: '임시 보관소', active: true }
-        ]);
-      }
-      
-      // 품목코드 (30개)
-      if (!storage.get('items')) {
-        storage.set('items', [
-          // 형강 10개
-          { id: 'I1', code: 'ITEM-001', name: 'H-100x100', steeltype: '0', spec: 'H-100X100', unitWeight: 17.2, safetyStock: 100, currentStock: 150 },
-          { id: 'I2', code: 'ITEM-002', name: 'H-125x125', steeltype: '0', spec: 'H-125X125', unitWeight: 23.8, safetyStock: 80, currentStock: 90 },
-          { id: 'I3', code: 'ITEM-003', name: 'H-150x150', steeltype: '0', spec: 'H-150X150', unitWeight: 31.9, safetyStock: 60, currentStock: 75 },
-          { id: 'I4', code: 'ITEM-004', name: 'H-175x175', steeltype: '0', spec: 'H-175X175', unitWeight: 40.1, safetyStock: 50, currentStock: 45 },
-          { id: 'I5', code: 'ITEM-005', name: 'H-200x200', steeltype: '0', spec: 'H-200X200', unitWeight: 49.9, safetyStock: 40, currentStock: 60 },
-          { id: 'I6', code: 'ITEM-006', name: 'H-250x250', steeltype: '0', spec: 'H-250X250', unitWeight: 72.4, safetyStock: 30, currentStock: 35 },
-          { id: 'I7', code: 'ITEM-007', name: 'H-300x300', steeltype: '0', spec: 'H-300X300', unitWeight: 94.0, safetyStock: 25, currentStock: 28 },
-          { id: 'I8', code: 'ITEM-008', name: 'H-350x350', steeltype: '0', spec: 'H-350X350', unitWeight: 137.0, safetyStock: 20, currentStock: 22 },
-          { id: 'I9', code: 'ITEM-009', name: 'H-400x400', steeltype: '0', spec: 'H-400X400', unitWeight: 172.0, safetyStock: 15, currentStock: 18 },
-          { id: 'I10', code: 'ITEM-010', name: 'H-500x500', steeltype: '0', spec: 'H-500X500', unitWeight: 284.0, safetyStock: 10, currentStock: 12 },
-          // 철판 15개
-          { id: 'I11', code: 'ITEM-011', name: '철판 6×1000', steeltype: '1', spec: 'PLATE', T: 6, W: 1000, unitWeight: 47.1, safetyStock: 200, currentStock: 250 },
-          { id: 'I12', code: 'ITEM-012', name: '철판 8×1200', steeltype: '1', spec: 'PLATE', T: 8, W: 1200, unitWeight: 75.36, safetyStock: 180, currentStock: 200 },
-          { id: 'I13', code: 'ITEM-013', name: '철판 10×1500', steeltype: '1', spec: 'PLATE', T: 10, W: 1500, unitWeight: 117.75, safetyStock: 150, currentStock: 165 },
-          { id: 'I14', code: 'ITEM-014', name: '철판 12×1800', steeltype: '1', spec: 'PLATE', T: 12, W: 1800, unitWeight: 169.56, safetyStock: 120, currentStock: 140 },
-          { id: 'I15', code: 'ITEM-015', name: '철판 15×2000', steeltype: '1', spec: 'PLATE', T: 15, W: 2000, unitWeight: 235.5, safetyStock: 100, currentStock: 110 },
-          { id: 'I16', code: 'ITEM-016', name: '철판 6×2840', steeltype: '1', spec: 'PLATE', T: 6, W: 2840, unitWeight: 133.746, safetyStock: 90, currentStock: 105 },
-          { id: 'I17', code: 'ITEM-017', name: '철판 8×2500', steeltype: '1', spec: 'PLATE', T: 8, W: 2500, unitWeight: 157.0, safetyStock: 80, currentStock: 95 },
-          { id: 'I18', code: 'ITEM-018', name: '철판 10×2280', steeltype: '1', spec: 'PLATE', T: 10, W: 2280, unitWeight: 178.98, safetyStock: 70, currentStock: 80 },
-          { id: 'I19', code: 'ITEM-019', name: '철판 12×2400', steeltype: '1', spec: 'PLATE', T: 12, W: 2400, unitWeight: 226.08, safetyStock: 65, currentStock: 75 },
-          { id: 'I20', code: 'ITEM-020', name: '철판 9×1500', steeltype: '1', spec: 'PLATE', T: 9, W: 1500, unitWeight: 105.975, safetyStock: 60, currentStock: 68 },
-          { id: 'I21', code: 'ITEM-021', name: '철판 7×1200', steeltype: '1', spec: 'PLATE', T: 7, W: 1200, unitWeight: 65.94, safetyStock: 55, currentStock: 62 },
-          { id: 'I22', code: 'ITEM-022', name: '철판 11×1800', steeltype: '1', spec: 'PLATE', T: 11, W: 1800, unitWeight: 155.43, safetyStock: 50, currentStock: 58 },
-          { id: 'I23', code: 'ITEM-023', name: '철판 14×2100', steeltype: '1', spec: 'PLATE', T: 14, W: 2100, unitWeight: 230.79, safetyStock: 45, currentStock: 52 },
-          { id: 'I24', code: 'ITEM-024', name: '철판 16×2200', steeltype: '1', spec: 'PLATE', T: 16, W: 2200, unitWeight: 276.32, safetyStock: 40, currentStock: 48 },
-          { id: 'I25', code: 'ITEM-025', name: '철판 20×2500', steeltype: '1', spec: 'PLATE', T: 20, W: 2500, unitWeight: 392.5, safetyStock: 35, currentStock: 42 },
-          // 일반 5개
-          { id: 'I26', code: 'ITEM-026', name: '볼트 M16', steeltype: '2', spec: 'M16X60', unitWeight: 0, safetyStock: 1000, currentStock: 1200 },
-          { id: 'I27', code: 'ITEM-027', name: '너트 M16', steeltype: '2', spec: 'M16', unitWeight: 0, safetyStock: 1000, currentStock: 1150 },
-          { id: 'I28', code: 'ITEM-028', name: '용접봉 3.2mm', steeltype: '2', spec: 'E4316', unitWeight: 0, safetyStock: 500, currentStock: 520 },
-          { id: 'I29', code: 'ITEM-029', name: '앵글 50x50', steeltype: '2', spec: 'L-50X50X5', unitWeight: 3.77, safetyStock: 200, currentStock: 215 },
-          { id: 'I30', code: 'ITEM-030', name: '강관 Ø60.5', steeltype: '2', spec: 'PIPE-60.5X3.2', unitWeight: 4.64, safetyStock: 150, currentStock: 165 }
-        ]);
-      }
-      
-      if (!storage.get('incomings')) storage.set('incomings', []);
-      if (!storage.get('outgoings')) storage.set('outgoings', []);
-      if (!storage.get('transfers')) storage.set('transfers', []);
-      if (!storage.get('purchases')) storage.set('purchases', []);
-      
-      // 결재자 (5개)
-      if (!storage.get('approvers')) {
-        storage.set('approvers', [
-          { id: 'APR001', role: 'approver', name: 'Kris', email: 'khwun@sms-sme.com' },
-          { id: 'APR002', role: 'payment', name: 'Mandy', email: 'accounting@sms-sme.com' },
-          { id: 'APR003', role: 'approver', name: 'David Kim', email: 'david.kim@sms-sme.com' },
-          { id: 'APR004', role: 'payment', name: 'Jenny Park', email: 'finance@sms-sme.com' },
-          { id: 'APR005', role: 'approver', name: 'Michael Lee', email: 'm.lee@sms-sme.com' }
-        ]);
-      }
+      // Vendors는 Supabase에서 직접 로드
+      // 나머지 테이블은 나중에 추가 예정
+      console.log('[Init] Vendors만 Supabase 연동 테스트 중...');
     };
 
     function App() {
