@@ -11,6 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.1/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     * { font-family: 'IBM Plex Sans KR', sans-serif; }
@@ -115,10 +116,59 @@
       },
     ];
 
-    // 로컬 스토리지
+    // ========== Supabase 초기화 ==========
+    const SUPABASE_URL = 'https://sfmaoxqnefwhsslzmqxm.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmbWFveHFuZWZ3aHNzbHptcXhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTE5MDAsImV4cCI6MjA4NTY2NzkwMH0.U4dNBNrLAGJrH7MpUu5e3852skyGgzeCfyqM1n3sen8';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // ========== Storage 래퍼 (Supabase + 캐시) ==========
     const storage = {
-      get: k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
-      set: (k, v) => localStorage.setItem(k, JSON.stringify(v))
+      cache: {},
+      
+      // 데이터 가져오기 (Supabase → 캐시)
+      get: async (table) => {
+        // 캐시에 있으면 바로 리턴
+        if (storage.cache[table]) {
+          return storage.cache[table];
+        }
+        
+        // Supabase에서 가져오기
+        try {
+          const { data, error } = await supabase.from(table).select('*');
+          if (error) throw error;
+          storage.cache[table] = data || [];
+          return storage.cache[table];
+        } catch (err) {
+          console.error(`[Supabase] ${table} 조회 실패:`, err);
+          return [];
+        }
+      },
+      
+      // 데이터 저장하기 (Supabase + 캐시 갱신)
+      set: async (table, data) => {
+        try {
+          // 기존 데이터 전체 삭제
+          await supabase.from(table).delete().neq('id', '');
+          
+          // 새 데이터 삽입
+          if (data && data.length > 0) {
+            const { error } = await supabase.from(table).insert(data);
+            if (error) throw error;
+          }
+          
+          // 캐시 갱신
+          storage.cache[table] = data;
+          return true;
+        } catch (err) {
+          console.error(`[Supabase] ${table} 저장 실패:`, err);
+          return false;
+        }
+      },
+      
+      // 캐시 초기화
+      clearCache: () => {
+        storage.cache = {};
+      }
     };
 
     // ========== 공통 유틸리티 ==========
@@ -907,22 +957,34 @@
 
     // 업체코드
     function Vendors() {
-      const [vendors, setVendors]     = useState(storage.get('vendors') || []);
-      const steeltypes                = storage.get('steeltypes') || [];
-      const [showForm, setShowForm]   = useState(false);
-      const [editItem, setEditItem]   = useState(null);
-      const emptyForm = { code: '', name: '', steeltype: '', tel: '', person: '', notes: '' };
-      const [formData, setFormData]   = useState(emptyForm);
+      const [vendors, setVendors] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [showForm, setShowForm] = useState(false);
+      const [editItem, setEditItem] = useState(null);
+      const emptyForm = { code: '', name: '', tel: '', person: '', notes: '' };
+      const [formData, setFormData] = useState(emptyForm);
+
+      // ── 데이터 로드 ──────────────────────────────────────
+      useEffect(() => {
+        loadVendors();
+      }, []);
+
+      const loadVendors = async () => {
+        setLoading(true);
+        const data = await storage.get('vendors');
+        setVendors(data);
+        setLoading(false);
+      };
 
       // ── 코드 자동생성 ──────────────────────────────────
-      // 규칙: VEN-001, VEN-002 … 기존 코드 중 숫자 최대값 +1
       const genCode = () => {
         let max = 0;
         vendors.forEach(v => {
-          const m = (v.code || '').match(/^VEN-(\d+)$/);
-          if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+          // 4자리 숫자 코드에서 최대값 찾기 (1001, 1002...)
+          const num = parseInt(v.code);
+          if (!isNaN(num) && num > max) max = num;
         });
-        return 'VEN-' + String(max + 1).padStart(3, '0');
+        return String(max + 1);
       };
 
       // ── 폼 열기 ─────────────────────────────────────────
@@ -936,7 +998,6 @@
         setFormData({
           code: item.code,
           name: item.name,
-          steeltype: item.steeltype || '',
           tel: item.tel || '',
           person: item.person || '',
           notes: item.notes || ''
@@ -946,139 +1007,170 @@
       const cancel = () => { setShowForm(false); setEditItem(null); setFormData(emptyForm); };
 
       // ── 저장 ────────────────────────────────────────────
-      const handleSave = () => {
-        if (!formData.name.trim())    { alert('업체명은 필수항목입니다'); return; }
-        if (!formData.steeltype)      { alert('업체구분은 필수항목입니다'); return; }
+      const handleSave = async () => {
+        if (!formData.name.trim()) { alert('업체명은 필수항목입니다'); return; }
+        
         // 코드 중복 체크 (신규만)
-        if (!editItem && vendors.find(v => v.code === formData.code)) { alert('코드가 중복됩니다'); return; }
-        let newList;
-        if (editItem) {
-          newList = vendors.map(v => v.id === editItem.id ? { ...v, ...formData } : v);
-        } else {
-          newList = [...vendors, { id: 'V' + Date.now(), ...formData, active: true }];
+        if (!editItem && vendors.find(v => v.code === formData.code)) { 
+          alert('코드가 중복됩니다'); 
+          return; 
         }
-        setVendors(newList);
-        storage.set('vendors', newList);
-        cancel();
+        
+        try {
+          if (editItem) {
+            // 수정
+            const { error } = await supabase
+              .from('vendors')
+              .update(formData)
+              .eq('id', editItem.id);
+            if (error) throw error;
+          } else {
+            // 신규
+            const { error } = await supabase
+              .from('vendors')
+              .insert([{ 
+                id: 'V' + Date.now(), 
+                ...formData, 
+                active: true 
+              }]);
+            if (error) throw error;
+          }
+          
+          alert(editItem ? '수정되었습니다' : '등록되었습니다');
+          cancel();
+          loadVendors(); // 새로고침
+        } catch (err) {
+          console.error('[Supabase] 저장 실패:', err);
+          alert('저장에 실패했습니다: ' + err.message);
+        }
       };
 
-      const handleDelete = (id) => {
+      // ── 삭제 ────────────────────────────────────────────
+      const handleDelete = async (id) => {
         if (!confirm('삭제하시겠습니까?')) return;
-        const newList = vendors.filter(v => v.id !== id);
-        setVendors(newList);
-        storage.set('vendors', newList);
+        
+        try {
+          const { error } = await supabase
+            .from('vendors')
+            .delete()
+            .eq('id', id);
+          if (error) throw error;
+          
+          alert('삭제되었습니다');
+          loadVendors(); // 새로고침
+        } catch (err) {
+          console.error('[Supabase] 삭제 실패:', err);
+          alert('삭제에 실패했습니다: ' + err.message);
+        }
       };
 
       // ── Toolbar 데이터 ──────────────────────────────────
-      const stName = code => (steeltypes.find(s => s.code === code) || {}).name || '';
-      const tHeaders = ['코드','업체명','업체구분','연락처','담당자'];
-      const tRows    = vendors.map(v => [v.code, v.name, stName(v.steeltype), v.tel||'-', v.person||'-']);
+      const tHeaders = ['코드','업체명','연락처','담당자'];
+      const tRows = vendors.map(v => [v.code, v.name, v.tel||'-', v.person||'-']);
 
       return (
         <div className="space-y-5">
-          {/* Toolbar */}
-          <Toolbar
-            title="업체코드"
-            subtitle="협력업체 코드 등록 및 관리"
-            onPrint={() => printPage('업체코드', tHeaders, tRows)}
-            onExcelDown={() => excelDown(tRows, tHeaders, '업체코드')}
-            onPdfDown={() => pdfDown('업체코드', tHeaders, tRows, '업체코드')}
-            onExcelUpload={() => alert('엑셀 업로드 기능은 추후 구현됩니다')}
-          >
-            {!showForm && (
-              <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold btn-primary">+ 추가</button>
-            )}
-          </Toolbar>
-
-          {/* 추가 / 수정 폼 */}
-          {showForm && (
-            <div className="bg-white p-5 rounded-xl border shadow-sm">
-              <h3 className="text-sm font-bold text-gray-700 mb-4 border-b pb-2">
-                {editItem ? '업체코드 수정' : '업체코드 추가'}
-              </h3>
-              <div className="grid grid-cols-5 gap-4">
-                {/* 코드 — 자동생성 / 수정시 disabled */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">코드 <span className="text-gray-400 font-normal">(자동생성)</span></label>
-                  <input type="text" value={formData.code} readOnly
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100 text-gray-500 mono cursor-not-allowed" />
-                </div>
-                {/* 업체명 — 필수 */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">업체명 <span className="text-red-500">*</span></label>
-                  <input type="text" value={formData.name} placeholder="예: SMS Steel"
-                    onChange={e => setFormData({...formData, name: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
-                </div>
-                {/* 업체구분 — 강종코드 드롭다운 */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">업체구분 <span className="text-red-500">*</span></label>
-                  <select value={formData.steeltype} onChange={e => setFormData({...formData, steeltype: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50">
-                    <option value="">-- 선택 --</option>
-                    {steeltypes.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
-                  </select>
-                </div>
-                {/* 연락처 */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">연락처</label>
-                  <input type="text" value={formData.tel} placeholder="예: 051-1234-5678"
-                    onChange={e => setFormData({...formData, tel: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
-                </div>
-                {/* 담당자 */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">담당자</label>
-                  <input type="text" value={formData.person} placeholder="예: 김철수"
-                    onChange={e => setFormData({...formData, person: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <button onClick={cancel}     className="px-4 py-1.5 rounded-lg border text-sm text-gray-600 hover:bg-gray-100">취소</button>
-                <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg text-sm font-semibold btn-primary">저장</button>
-              </div>
-            </div>
+          {/* Loading */}
+          {loading && (
+            <div className="text-center py-20 text-gray-400">데이터를 불러오는 중...</div>
           )}
-
-          {/* 리스트 테이블 */}
-          <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  {['코드','업체명','업체구분','연락처','담당자','작업'].map(h => (
-                    <th key={h} className="px-5 py-3 text-xs font-semibold text-gray-600 border-b text-left">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {vendors.length === 0 && (
-                  <tr><td colSpan={6} className="text-center py-10 text-gray-400 text-sm">등록된 업체가 없습니다.</td></tr>
+          
+          {!loading && (
+            <>
+              {/* Toolbar */}
+              <Toolbar
+                title="업체코드"
+                subtitle="협력업체 코드 등록 및 관리"
+                onPrint={() => printPage('업체코드', tHeaders, tRows)}
+                onExcelDown={() => excelDown(tRows, tHeaders, '업체코드')}
+                onPdfDown={() => pdfDown('업체코드', tHeaders, tRows, '업체코드')}
+                onExcelUpload={() => alert('엑셀 업로드 기능은 추후 구현됩니다')}
+              >
+                {!showForm && (
+                  <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold btn-primary">+ 추가</button>
                 )}
-                {vendors.map(v => (
-                  <tr key={v.id} className="border-b hover:bg-gray-50">
-                    <td className="px-5 py-3 mono text-blue-600 text-sm font-semibold">{v.code}</td>
-                    <td className="px-5 py-3 text-sm font-semibold text-gray-800">{v.name}</td>
-                    <td className="px-5 py-3">
-                      {v.steeltype ? (
-                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                          stName(v.steeltype) === '형강' ? 'bg-purple-100 text-purple-700' :
-                          stName(v.steeltype) === '철판' ? 'bg-blue-100 text-blue-700' :
-                          'bg-gray-100 text-gray-600'
-                        }`}>{stName(v.steeltype)}</span>
-                      ) : <span className="text-xs text-gray-400">-</span>}
-                    </td>
-                    <td className="px-5 py-3 text-sm text-gray-600">{v.tel || '-'}</td>
-                    <td className="px-5 py-3 text-sm text-gray-600">{v.person || '-'}</td>
-                    <td className="px-5 py-3 flex gap-3">
-                      <button onClick={() => openEdit(v)} className="text-blue-600 hover:text-blue-800 text-xs font-semibold">수정</button>
-                      <button onClick={() => handleDelete(v.id)} className="text-red-500 hover:text-red-700 text-xs font-semibold">삭제</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              </Toolbar>
+
+              {/* 추가 / 수정 폼 */}
+              {showForm && (
+                <div className="bg-white p-5 rounded-xl border shadow-sm">
+                  <h3 className="text-sm font-bold text-gray-700 mb-4 border-b pb-2">
+                    {editItem ? '업체코드 수정' : '업체코드 추가'}
+                  </h3>
+                  <div className="grid grid-cols-4 gap-4">
+                    {/* 코드 — 자동생성 / 수정시 disabled */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">코드 <span className="text-gray-400 font-normal">(자동생성)</span></label>
+                      <input type="text" value={formData.code} readOnly
+                        className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100 text-gray-500 mono cursor-not-allowed" />
+                    </div>
+                    {/* 업체명 — 필수 */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">업체명 <span className="text-red-500">*</span></label>
+                      <input type="text" value={formData.name} placeholder="예: SMS Steel"
+                        onChange={e => setFormData({...formData, name: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
+                    </div>
+                    {/* 연락처 */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">연락처</label>
+                      <input type="text" value={formData.tel} placeholder="예: 051-1234-5678"
+                        onChange={e => setFormData({...formData, tel: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
+                    </div>
+                    {/* 담당자 */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">담당자</label>
+                      <input type="text" value={formData.person} placeholder="예: 김철수"
+                        onChange={e => setFormData({...formData, person: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
+                    </div>
+                  </div>
+                  {/* 비고 */}
+                  <div className="mt-4">
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">비고</label>
+                    <textarea value={formData.notes} placeholder="비고 사항 입력"
+                      onChange={e => setFormData({...formData, notes: e.target.value})}
+                      className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" rows={2} />
+                  </div>
+                  <div className="flex justify-end gap-2 mt-4">
+                    <button onClick={cancel} className="px-4 py-1.5 rounded-lg border text-sm text-gray-600 hover:bg-gray-100">취소</button>
+                    <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg text-sm font-semibold btn-primary">저장</button>
+                  </div>
+                </div>
+              )}
+
+              {/* 리스트 테이블 */}
+              <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      {['코드','업체명','연락처','담당자','작업'].map(h => (
+                        <th key={h} className="px-5 py-3 text-xs font-semibold text-gray-600 border-b text-left">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vendors.length === 0 && (
+                      <tr><td colSpan={5} className="text-center py-10 text-gray-400 text-sm">등록된 업체가 없습니다.</td></tr>
+                    )}
+                    {vendors.map(v => (
+                      <tr key={v.id} className="border-b hover:bg-gray-50">
+                        <td className="px-5 py-3 mono text-blue-600 text-sm font-semibold">{v.code}</td>
+                        <td className="px-5 py-3 text-sm font-semibold text-gray-800">{v.name}</td>
+                        <td className="px-5 py-3 text-sm text-gray-600">{v.tel || '-'}</td>
+                        <td className="px-5 py-3 text-sm text-gray-600">{v.person || '-'}</td>
+                        <td className="px-5 py-3 flex gap-3">
+                          <button onClick={() => openEdit(v)} className="text-blue-600 hover:text-blue-800 text-xs font-semibold">수정</button>
+                          <button onClick={() => handleDelete(v.id)} className="text-red-500 hover:text-red-700 text-xs font-semibold">삭제</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       );
     }
