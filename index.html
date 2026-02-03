@@ -265,17 +265,12 @@
 
     function App() {
       const [currentView, setCurrentView] = useState('dashboard-main');
-      const [user, setUser] = useState(null);
+      const [user, setUser] = useState({ email: 'demo@example.com', name: '데모 사용자' });
       const [openMenu, setOpenMenu] = useState('dashboard');
 
       useEffect(() => {
         initData();
-        const u = storage.get('user') || { email: 'demo@example.com', name: '데모 사용자' };
-        storage.set('user', u);
-        setUser(u);
       }, []);
-
-      if (!user) return <div>Loading...</div>;
 
       const handleMenuClick = (menuId, itemId) => {
         setOpenMenu(menuId);
