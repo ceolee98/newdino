@@ -379,10 +379,37 @@
     }
 
     // 대시보드
+    // 대시보드 (임시로 간단하게)
     function Dashboard() {
-      const projects = storage.get('projects') || [];
-      const purchases = storage.get('purchases') || [];
-      const vendors = storage.get('vendors') || [];
+      return (
+        <div className="space-y-6">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800">대시보드</h1>
+            <p className="text-gray-500 mt-1">Supabase 연동 테스트 중</p>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
+            <h2 className="text-xl font-bold text-blue-600 mb-2">✅ Vendors 테이블 연동 완료</h2>
+            <p className="text-gray-700">정보관리 → 업체코드 메뉴에서 테스트하세요!</p>
+            <ul className="mt-4 space-y-2 text-sm text-gray-600">
+              <li>• Supabase에서 실시간으로 데이터 로드</li>
+              <li>• 추가/수정/삭제 기능 작동</li>
+              <li>• 나머지 테이블은 추후 연동 예정</li>
+            </ul>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl border">
+            <h3 className="font-bold text-gray-700 mb-3">📋 다음 단계</h3>
+            <ol className="list-decimal list-inside space-y-2 text-gray-600">
+              <li>Vendors 테이블 테스트 (추가/수정/삭제)</li>
+              <li>나머지 테이블 생성 (items, projects 등)</li>
+              <li>전체 메뉴 Supabase 연동</li>
+              <li>Dashboard 기능 복원</li>
+            </ol>
+          </div>
+        </div>
+      );
+    }
       
       // 활성 프로젝트
       const activeProjects = projects.filter(p => p.active);
