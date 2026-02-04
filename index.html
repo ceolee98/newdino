@@ -11,6 +11,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.1/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     * { font-family: 'IBM Plex Sans KR', sans-serif; }
@@ -115,7 +117,49 @@
       },
     ];
 
-    // 로컬 스토리지
+    // ========== Supabase 초기화 ==========
+    const SUPABASE_URL = 'https://sfmaoxqnefwhsslzmqxm.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmbWFveHFuZWZ3aHNzbHptcXhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTE5MDAsImV4cCI6MjA4NTY2NzkwMH0.U4dNBNrLAGJrH7MpUu5e3852skyGgzeCfyqM1n3sen8';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // ========== EmailJS 초기화 ==========
+    const EMAILJS_PUBLIC_KEY = '8C2gtP6T9AzQka5vr';
+    const EMAILJS_SERVICE_ID = 'leeyunjean@sms-sme.com';
+    const EMAILJS_TEMPLATE_ID = 'template_yxob1kn';
+    
+    // EmailJS 초기화
+    if (typeof emailjs !== 'undefined') {
+      emailjs.init(EMAILJS_PUBLIC_KEY);
+    }
+
+    // 이메일 발송 함수
+    const sendApprovalEmail = async (orderData, approverEmail, approverName) => {
+      try {
+        const templateParams = {
+          to_email: approverEmail,
+          approver_name: approverName,
+          order_no: orderData.order_no,
+          order_date: orderData.order_date,
+          vendor_name: orderData.vendor_name,
+          total_amount: Number(orderData.total_amount || 0).toLocaleString(),
+          approval_link: window.location.origin + window.location.pathname
+        };
+
+        const response = await emailjs.send(
+          EMAILJS_SERVICE_ID,
+          EMAILJS_TEMPLATE_ID,
+          templateParams
+        );
+
+        console.log('이메일 발송 성공:', response);
+        return { success: true, response };
+      } catch (error) {
+        console.error('이메일 발송 실패:', error);
+        return { success: false, error };
+      }
+    };
+
+    // 로컬 스토리지 (임시 캐시용으로만 사용)
     const storage = {
       get: k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
       set: (k, v) => localStorage.setItem(k, JSON.stringify(v))
@@ -323,19 +367,220 @@
       }
     };
 
+    // ========== 로그인 컴포넌트 ==========
+    function LoginScreen({ onLogin }) {
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [showReset, setShowReset] = useState(false);
+      const [resetEmail, setResetEmail] = useState('');
+      const [message, setMessage] = useState('');
+
+      const handleLogin = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setMessage('');
+
+        try {
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password
+          });
+
+          if (error) throw error;
+          
+          onLogin(data.user);
+          setMessage('로그인 성공!');
+        } catch (error) {
+          setMessage('로그인 실패: ' + error.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handlePasswordReset = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setMessage('');
+
+        try {
+          const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+            redirectTo: window.location.origin
+          });
+
+          if (error) throw error;
+          
+          setMessage('비밀번호 재설정 이메일을 발송했습니다. 이메일을 확인해주세요.');
+          setShowReset(false);
+        } catch (error) {
+          setMessage('오류: ' + error.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      if (showReset) {
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">비밀번호 찾기</h1>
+              <p className="text-gray-600 mb-6">이메일을 입력하시면 재설정 링크를 보내드립니다</p>
+
+              <form onSubmit={handlePasswordReset} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">이메일</label>
+                  <input
+                    type="email"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="your@email.com"
+                    required
+                  />
+                </div>
+
+                {message && (
+                  <div className={`p-3 rounded-lg text-sm ${
+                    message.includes('성공') || message.includes('발송')
+                      ? 'bg-green-50 text-green-700 border border-green-200'
+                      : 'bg-red-50 text-red-700 border border-red-200'
+                  }`}>
+                    {message}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50"
+                >
+                  {loading ? '처리중...' : '재설정 이메일 발송'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowReset(false)}
+                  className="w-full text-gray-600 hover:text-gray-800 font-medium py-2"
+                >
+                  ← 로그인으로 돌아가기
+                </button>
+              </form>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+            <div className="text-center mb-8">
+              <h1 className="text-4xl font-bold text-blue-600 mono mb-2">STOCK.SYS</h1>
+              <p className="text-gray-600">SMS-SME 재고관리 시스템</p>
+            </div>
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">이메일</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="your@sms-sme.com"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">비밀번호</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+
+              {message && (
+                <div className={`p-3 rounded-lg text-sm ${
+                  message.includes('성공')
+                    ? 'bg-green-50 text-green-700 border border-green-200'
+                    : 'bg-red-50 text-red-700 border border-red-200'
+                }`}>
+                  {message}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50"
+              >
+                {loading ? '로그인 중...' : '로그인'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowReset(true)}
+                className="w-full text-sm text-gray-600 hover:text-gray-800"
+              >
+                비밀번호를 잊으셨나요?
+              </button>
+            </form>
+
+            <div className="mt-6 pt-6 border-t border-gray-200 text-center text-xs text-gray-500">
+              © 2025 SMS-SME. All rights reserved.
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function App() {
       const [currentView, setCurrentView] = useState('dashboard-main');
       const [user, setUser] = useState(null);
       const [openMenu, setOpenMenu] = useState('dashboard');
+      const [loading, setLoading] = useState(true);
+      const [editingPurchase, setEditingPurchase] = useState(null); // 수정할 발주 데이터
 
       useEffect(() => {
-        initData();
-        const u = storage.get('user') || { email: 'demo@example.com', name: '데모 사용자' };
-        storage.set('user', u);
-        setUser(u);
+        // 세션 체크
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          setUser(session?.user ?? null);
+          setLoading(false);
+        });
+
+        // Auth 상태 변경 리스너
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+          setUser(session?.user ?? null);
+        });
+
+        return () => subscription.unsubscribe();
       }, []);
 
-      if (!user) return <div>Loading...</div>;
+      const handleLogout = async () => {
+        if (confirm('로그아웃 하시겠습니까?')) {
+          await supabase.auth.signOut();
+          setUser(null);
+        }
+      };
+
+      if (loading) {
+        return (
+          <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-4xl mb-4">⏳</div>
+              <div className="text-gray-600">로딩 중...</div>
+            </div>
+          </div>
+        );
+      }
+
+      if (!user) {
+        return <LoginScreen onLogin={setUser} />;
+      }
 
       const handleMenuClick = (menuId, itemId) => {
         setOpenMenu(menuId);
@@ -385,15 +630,21 @@
 
             {/* 사용자 정보 */}
             <div className="p-4 border-t border-gray-200">
-              <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-3 mb-3">
                 <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-semibold">
-                  {user.name.charAt(0)}
+                  {user.email.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
+                  <p className="text-sm font-semibold text-gray-900 truncate">{user.email.split('@')[0]}</p>
                   <p className="text-xs text-gray-500 truncate">{user.email}</p>
                 </div>
               </div>
+              <button
+                onClick={handleLogout}
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium py-2 px-3 rounded-lg transition"
+              >
+                로그아웃
+              </button>
             </div>
           </div>
 
@@ -417,8 +668,8 @@
           case 'warehouses':      return <Warehouses />;
           case 'steeltype':       return <SteelType />;
           case 'approvers':       return <Approvers />;
-          case 'purchase-order':  return <PurchaseOrder />;
-          case 'purchase-list':   return <PurchaseList />;
+          case 'purchase-order':  return <PurchaseOrder editingPurchase={editingPurchase} setEditingPurchase={setEditingPurchase} setCurrentView={setCurrentView} />;
+          case 'purchase-list':   return <PurchaseList setEditingPurchase={setEditingPurchase} setCurrentView={setCurrentView} />;
           case 'incoming-create': return <IncomingCreate />;
           case 'incoming-list':   return <IncomingList />;
           case 'outgoing-create': return <OutgoingCreate />;
@@ -602,299 +853,363 @@
     }
 
     // ========== 품목코드 ==========
+    // ========== Items 컴포넌트 (품목코드) - Supabase + 자동 로그 ==========
     function Items() {
-      const [items, setItems] = useState(storage.get('items') || []);
+      const [items, setItems] = useState([]);
+      const [steeltypes, setSteeltypes] = useState([]);
+      const [loading, setLoading] = useState(true);
       const [showForm, setShowForm] = useState(false);
       const [editItem, setEditItem] = useState(null);
-      const steeltypes = storage.get('steeltypes') || [];
-      const emptyForm = { code:'', name:'', steeltype:'', spec:'', T:0, W:0, unitWeight:0, safetyStock:0, notes:'' };
+      const emptyForm = { code:'', name:'', steeltype:'', spec:'', T:0, W:0, unit_weight:0, safety_stock:0, notes:'' };
       const [formData, setFormData] = useState(emptyForm);
+      const [currentUser, setCurrentUser] = useState(null);
+      const [similarItems, setSimilarItems] = useState([]); // 유사 품목 목록
 
-      // ── H형강 단중 테이블 (KS 표준) ─────────────────────
-      const H_BEAM_TABLE = {
-        'H-100X100': 17.2,  'H-125X125': 23.8,  'H-150X150': 31.9,
-        'H-175X175': 40.1,  'H-200X200': 49.9,  'H-200X204': 50.1,
-        'H-244X252': 72.4,  'H-250X250': 72.4,  'H-250X255': 79.0,
-        'H-294X302': 94.0,  'H-300X300': 94.0,  'H-300X305': 97.0,
-        'H-340X350': 115.0, 'H-350X350': 137.0, 'H-400X400': 172.0,
-        'H-450X450': 220.0, 'H-500X500': 284.0
+      useEffect(() => {
+        loadData();
+        getCurrentUser();
+      }, []);
+
+      const getCurrentUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        setCurrentUser(user);
       };
 
-      // ── 품목코드 자동생성: ITEM-001, ITEM-002 ... ──────────
+      const loadData = async () => {
+        setLoading(true);
+        try {
+          const [itemsRes, steeltypesRes] = await Promise.all([
+            supabase.from('items').select('*').is('deleted_at', null).order('code'),
+            supabase.from('steeltypes').select('*').order('code')
+          ]);
+          
+          if (itemsRes.error) throw itemsRes.error;
+          if (steeltypesRes.error) throw steeltypesRes.error;
+          
+          setItems(itemsRes.data || []);
+          setSteeltypes(steeltypesRes.data || []);
+        } catch (err) {
+          console.error('데이터 로드 실패:', err);
+          alert('데이터를 불러오는데 실패했습니다: ' + err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
       const genCode = () => {
         let max = 0;
         items.forEach(i => {
           const m = (i.code || '').match(/^ITEM-(\d+)$/);
-          if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+          if (m) { 
+            const n = parseInt(m[1], 10); 
+            if (n > max) max = n; 
+          }
         });
         return 'ITEM-' + String(max + 1).padStart(3, '0');
       };
 
-      // ── 폼 열기 ─────────────────────────────────────────────
-      const openAdd  = () => { setEditItem(null); setFormData({...emptyForm, code: genCode()}); setShowForm(true); };
-      const openEdit = (item) => { setEditItem(item); setFormData({...emptyForm, ...item}); setShowForm(true); };
-      const cancel   = () => { setShowForm(false); setEditItem(null); setFormData(emptyForm); };
+      const openAdd = () => { 
+        setEditItem(null); 
+        setFormData({...emptyForm, code: genCode()}); 
+        setSimilarItems([]); // 유사 품목 초기화
+        setShowForm(true); 
+      };
+      
+      const openEdit = (item) => { 
+        setEditItem(item); 
+        setFormData({...emptyForm, ...item}); 
+        setSimilarItems([]); // 유사 품목 초기화
+        setShowForm(true); 
+      };
+      
+      // 유사 품목 검색
+      const searchSimilarItems = (searchName) => {
+        if (!searchName || searchName.length < 2) {
+          setSimilarItems([]);
+          return;
+        }
+        
+        const search = searchName.toLowerCase().trim();
+        const similar = items.filter(item => {
+          // 수정 중인 품목은 제외
+          if (editItem && item.id === editItem.id) return false;
+          
+          const itemName = (item.name || '').toLowerCase();
+          const itemSpec = (item.spec || '').toLowerCase();
+          
+          // 품목명 또는 규격에 검색어 포함
+          return itemName.includes(search) || itemSpec.includes(search);
+        }).slice(0, 5); // 최대 5개만
+        
+        setSimilarItems(similar);
+      };
+      
+      // 품목명 변경 핸들러
+      const handleNameChange = (e) => {
+        const newName = e.target.value;
+        setFormData({...formData, name: newName});
+        searchSimilarItems(newName);
+      };
+      
+      const cancel = () => { 
+        setShowForm(false); 
+        setEditItem(null); 
+        setFormData(emptyForm); 
+      };
 
-      // ── 단중 자동계산 (강종구분별) ──────────────────────────
-      // [형강] 규격 → H형강 테이블 검색 / 없으면 근사공식 / [철판] T×W 공식 / [일반] 수기
-      const calcUnitWeight = (fd) => {
-        // 형강 (steeltype='0')
-        if (fd.steeltype === '0' && fd.spec) {
-          const normalized = fd.spec.toUpperCase().replace(/\s/g, ''); // 대문자 + 공백제거
+      const handleSave = async () => {
+        if (!formData.name.trim()) { 
+          alert('품목명은 필수항목입니다'); 
+          return; 
+        }
+
+        if (!editItem && items.find(i => i.code === formData.code)) { 
+          alert('코드가 중복됩니다'); 
+          return; 
+        }
+
+        try {
+          const now = new Date().toISOString();
           
-          // 1) 테이블 조회 (정확)
-          if (H_BEAM_TABLE[normalized]) {
-            return H_BEAM_TABLE[normalized];
-          }
-          
-          // 2) 테이블에 없으면 근사 공식 시도
-          // H-###x### 패턴 파싱: H-200x200 → H=200, B=200
-          const match = normalized.match(/^H-?(\d{3,4})[X×](\d{3,4})$/);
-          if (match) {
-            const H = parseInt(match[1]); // 높이(mm)
-            const B = parseInt(match[2]); // 폭(mm)
+          if (editItem) {
+            const { error } = await supabase
+              .from('items')
+              .update({
+                ...formData,
+                updated_by: currentUser?.email,
+                updated_at: now
+              })
+              .eq('id', editItem.id);
             
-            // H형강 근사 공식 (웹두께 8mm 가정)
-            // 단중 ≈ (H×2 + B×2) × t_web × 7.85 / 1000
-            // 표준 웹두께: 소형(H<200)=6mm, 중형(200≤H<350)=8mm, 대형(H≥350)=10mm
-            const t = H < 200 ? 6 : H < 350 ? 8 : 10;
-            const approx = parseFloat(((H * 2 + B * 2) * t * 7.85 / 1000).toFixed(1));
-            return approx;
+            if (error) throw error;
+            alert('수정되었습니다');
+          } else {
+            const { error } = await supabase
+              .from('items')
+              .insert([{
+                id: 'I' + Date.now(),
+                ...formData,
+                created_by: currentUser?.email,
+                created_at: now
+              }]);
+            
+            if (error) throw error;
+            alert('등록되었습니다');
           }
-          
-          // 3) 파싱 실패 시 기존 unitWeight 유지 (수기입력)
-          return fd.unitWeight;
+
+          cancel();
+          loadData();
+        } catch (err) {
+          console.error('저장 실패:', err);
+          alert('저장에 실패했습니다: ' + err.message);
         }
-        
-        // 철판 (steeltype='1')
-        if (fd.steeltype === '1') {
-          const t = Number(fd.T)||0, w = Number(fd.W)||0;
-          if (!t || !w) return 0;
-          return parseFloat((t * w * 7.85 / 1000).toFixed(3));
-        }
-        
-        // 일반 (steeltype='2') → 수기입력
-        return fd.unitWeight;
       };
 
-      // ── 규격 변경 시 단중 자동계산 트리거 ────────────────────
-      const handleSpecChange = (val) => {
-        const updated = {...formData, spec: val};
-        const newWeight = calcUnitWeight(updated);
-        setFormData({...updated, unitWeight: newWeight});
-      };
-
-      const handleTWChange = (field, val) => {
-        const updated = {...formData, [field]: Number(val)};
-        const newWeight = calcUnitWeight(updated);
-        setFormData({...updated, unitWeight: newWeight});
-      };
-
-      // ── 저장 ────────────────────────────────────────────────
-      const handleSave = () => {
-        if (!formData.name.trim())   { alert('품목명은 필수항목입니다'); return; }
-        if (!formData.steeltype)     { alert('강종구분은 필수항목입니다'); return; }
-        // 철판이면 T/W 필수
-        if (formData.steeltype === '1') {
-          if (!formData.T || !formData.W) { alert('철판은 T와 W를 입력해야 합니다'); return; }
-        }
-        // 코드 중복 체크
-        if (!editItem && items.find(i => i.code === formData.code)) { alert('코드 중복'); return; }
-        
-        const saved = { ...formData, unitWeight: calcUnitWeight(formData), currentStock: editItem ? editItem.currentStock : 0 };
-        const newList = editItem
-          ? items.map(i => i.id === editItem.id ? { ...i, ...saved } : i)
-          : [...items, { id: 'I' + Date.now(), ...saved }];
-        setItems(newList);
-        storage.set('items', newList);
-        cancel();
-      };
-
-      const handleDelete = (id) => {
+      const handleDelete = async (id) => {
         if (!confirm('삭제하시겠습니까?')) return;
-        const n = items.filter(i => i.id !== id);
-        setItems(n); storage.set('items', n);
+
+        try {
+          const now = new Date().toISOString();
+          const { error } = await supabase
+            .from('items')
+            .update({
+              active: false,
+              deleted_by: currentUser?.email,
+              deleted_at: now
+            })
+            .eq('id', id);
+          
+          if (error) throw error;
+          alert('삭제되었습니다');
+          loadData();
+        } catch (err) {
+          console.error('삭제 실패:', err);
+          alert('삭제에 실패했습니다: ' + err.message);
+        }
       };
 
-      const catLabel = (code) => (steeltypes.find(s => s.code === code) || {}).name || code;
-
-      // 기존 규격 리스트 (중복 제거)
-      const existingSpecs = [...new Set(items.map(i => i.spec).filter(s => s))];
-
-      // Toolbar 데이터
-      const tHeaders = ['품목코드','품목명','강종','규격','단중(kg/m)','안전재고','현재고'];
+      const stName = code => (steeltypes.find(s => s.code === code) || {}).name || '';
+      
+      const tHeaders = ['코드','품목명','강종','규격','단중','안전재고','작성자','작성일'];
       const tRows = items.map(i => [
-        i.code, i.name, catLabel(i.steeltype), i.spec||'-',
-        i.unitWeight ? i.unitWeight.toFixed(3) : '-',
-        i.safetyStock||0, i.currentStock||0
+        i.code, 
+        i.name, 
+        stName(i.steeltype),
+        i.spec||'-', 
+        i.unit_weight||'-',
+        i.safety_stock||0,
+        i.created_by || '-',
+        i.created_at ? new Date(i.created_at).toLocaleDateString('ko-KR') : '-'
       ]);
+
+      if (loading) {
+        return (
+          <div className="text-center py-20">
+            <div className="text-4xl mb-4">⏳</div>
+            <div className="text-gray-600">데이터를 불러오는 중...</div>
+          </div>
+        );
+      }
 
       return (
         <div className="space-y-5">
-          {/* Toolbar */}
-          <Toolbar
-            title="품목코드"
-            subtitle="철판·형강·일반 품목 등록 및 관리"
+          <Toolbar 
+            title="품목코드" 
+            subtitle="자재 품목 등록 및 관리"
             onPrint={() => printPage('품목코드', tHeaders, tRows)}
             onExcelDown={() => excelDown(tRows, tHeaders, '품목코드')}
             onPdfDown={() => pdfDown('품목코드', tHeaders, tRows, '품목코드')}
             onExcelUpload={() => alert('엑셀 업로드 기능은 추후 구현됩니다')}
           >
             {!showForm && (
-              <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold btn-primary">+ 추가</button>
+              <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold btn-primary">
+                + 추가
+              </button>
             )}
           </Toolbar>
 
-          {/* 추가/수정 폼 */}
           {showForm && (
             <div className="bg-white p-5 rounded-xl border shadow-sm">
               <h3 className="text-sm font-bold text-gray-700 mb-4 border-b pb-2">
-                {editItem ? '품목코드 수정' : '품목코드 추가'}
+                {editItem ? '품목 수정' : '품목 추가'}
               </h3>
-              
-              {/* 첫 행: 코드 / 품목명 / 강종구분 / 규격 / 안전재고 */}
-              <div className="grid grid-cols-5 gap-3">
-                {/* 품목코드 — 자동생성 */}
+              <div className="grid grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">품목코드 <span className="text-gray-400 font-normal">(자동)</span></label>
-                  <input type="text" value={formData.code} readOnly
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">코드</label>
+                  <input type="text" value={formData.code} readOnly 
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100 text-gray-500 mono cursor-not-allowed" />
                 </div>
-                {/* 품목명 — 필수 */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">품목명 <span className="text-red-500">*</span></label>
-                  <input type="text" value={formData.name} placeholder="예: H형강200"
-                    onChange={e => setFormData({...formData, name: e.target.value})}
+                <div className="col-span-3">
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    품목명 <span className="text-red-500">*</span>
+                  </label>
+                  <input type="text" value={formData.name} placeholder="예: H-200x200"
+                    onChange={handleNameChange}
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
+                  
+                  {/* 유사 품목 표시 */}
+                  {similarItems.length > 0 && (
+                    <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-yellow-600 text-sm">⚠️</span>
+                        <span className="text-xs font-semibold text-yellow-800">유사한 품목이 있습니다</span>
+                      </div>
+                      <div className="space-y-1">
+                        {similarItems.map(item => (
+                          <div key={item.id} className="text-xs text-gray-700 flex items-center gap-2 hover:bg-yellow-100 p-1 rounded">
+                            <span className="font-semibold mono">{item.code}</span>
+                            <span>{item.name}</span>
+                            {item.spec && <span className="text-gray-500">({item.spec})</span>}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-yellow-700 mt-2">
+                        💡 중복 등록이 아닌지 확인해주세요
+                      </p>
+                    </div>
+                  )}
                 </div>
-                {/* 강종구분 — 필수 드롭다운 */}
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4 mt-4">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">강종구분 <span className="text-red-500">*</span></label>
-                  <select value={formData.steeltype} onChange={e => setFormData({...formData, steeltype: e.target.value})}
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">강종구분</label>
+                  <select value={formData.steeltype} 
+                    onChange={e => setFormData({...formData, steeltype: e.target.value})} 
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50">
-                    <option value="">-- 선택 --</option>
+                    <option value="">선택</option>
                     {steeltypes.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
                   </select>
                 </div>
-                {/* 규격 — datalist (기존 규격 드롭다운 + 수기입력) */}
-                <div>
+                <div className="col-span-2">
                   <label className="block text-xs font-semibold text-gray-600 mb-1">규격</label>
-                  <input type="text" value={formData.spec} placeholder="예: H-200x200"
-                    list="spec-list"
-                    onChange={e => handleSpecChange(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
-                  <datalist id="spec-list">
-                    {existingSpecs.map((s, i) => <option key={i} value={s} />)}
-                    {Object.keys(H_BEAM_TABLE).map((k, i) => <option key={'h'+i} value={k} />)}
-                  </datalist>
-                </div>
-                {/* 안전재고 */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">안전재고</label>
-                  <input type="number" value={formData.safetyStock}
-                    onChange={e => setFormData({...formData, safetyStock: Number(e.target.value)})}
+                  <input type="text" value={formData.spec} placeholder="예: H-200X200"
+                    onChange={e => setFormData({...formData, spec: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
                 </div>
               </div>
-
-              {/* 강종별 추가 입력 행 */}
-              {/* 철판(1): T/W 입력 + 단중 자동 */}
-              {formData.steeltype === '1' && (
-                <div className="grid grid-cols-5 gap-3 mt-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">T (mm) <span className="text-red-500">*</span></label>
-                    <input type="number" step="0.1" value={formData.T}
-                      onChange={e => handleTWChange('T', e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">W (mm) <span className="text-red-500">*</span></label>
-                    <input type="number" step="1" value={formData.W}
-                      onChange={e => handleTWChange('W', e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">단중 (kg/m) — 자동계산</label>
-                    <input type="text" disabled value={calcUnitWeight(formData).toFixed(3)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100 text-blue-600 font-semibold mono" />
-                  </div>
-                  <div className="col-span-2"></div>
+              
+              <div className="grid grid-cols-4 gap-4 mt-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">T (두께)</label>
+                  <input type="number" value={formData.T} 
+                    onChange={e => setFormData({...formData, T: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
                 </div>
-              )}
-              {/* 형강(0): 단중 자동 또는 수기 */}
-              {formData.steeltype === '0' && (
-                <div className="grid grid-cols-5 gap-3 mt-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">단중 (kg/m)</label>
-                    <input type="number" step="0.1" value={formData.unitWeight}
-                      onChange={e => setFormData({...formData, unitWeight: Number(e.target.value)})}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50"
-                      placeholder={formData.spec && H_BEAM_TABLE[formData.spec.toUpperCase().replace(/\s/g,'')] ? '자동계산됨' : '직접입력'} />
-                  </div>
-                  <div className="col-span-4">
-                    {formData.spec && H_BEAM_TABLE[formData.spec.toUpperCase().replace(/\s/g,'')] && (
-                      <p className="text-xs text-green-600 mt-6">✅ H형강 테이블에서 정확값 조회: {calcUnitWeight(formData)} kg/m</p>
-                    )}
-                    {formData.spec && !H_BEAM_TABLE[formData.spec.toUpperCase().replace(/\s/g,'')] && (
-                      <p className="text-xs text-blue-600 mt-6">📐 근사공식으로 자동계산: {calcUnitWeight(formData)} kg/m (±10% 오차 가능, 검증 권장)</p>
-                    )}
-                  </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">W (폭)</label>
+                  <input type="number" value={formData.W} 
+                    onChange={e => setFormData({...formData, W: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
                 </div>
-              )}
-              {/* 일반(2): 단중 수기입력만 */}
-              {formData.steeltype === '2' && (
-                <div className="grid grid-cols-5 gap-3 mt-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">단중 (수기입력)</label>
-                    <input type="number" step="0.1" value={formData.unitWeight}
-                      onChange={e => setFormData({...formData, unitWeight: Number(e.target.value)})}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
-                  </div>
-                  <div className="col-span-4"></div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">단중 (kg/m)</label>
+                  <input type="number" value={formData.unit_weight} 
+                    onChange={e => setFormData({...formData, unit_weight: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
                 </div>
-              )}
-
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">안전재고</label>
+                  <input type="number" value={formData.safety_stock} 
+                    onChange={e => setFormData({...formData, safety_stock: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
+                </div>
+              </div>
+              
+              <div className="mt-4">
+                <label className="block text-xs font-semibold text-gray-600 mb-1">비고</label>
+                <textarea value={formData.notes} placeholder="비고 사항 입력"
+                  onChange={e => setFormData({...formData, notes: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" rows={2} />
+              </div>
+              
               <div className="flex justify-end gap-2 mt-4">
-                <button onClick={cancel} className="px-4 py-1.5 rounded-lg border text-sm text-gray-600 hover:bg-gray-100">취소</button>
-                <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg text-sm font-semibold btn-primary">저장</button>
+                <button onClick={cancel} 
+                  className="px-4 py-1.5 rounded-lg border text-sm text-gray-600 hover:bg-gray-100">
+                  취소
+                </button>
+                <button onClick={handleSave} 
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg text-sm font-semibold btn-primary">
+                  저장
+                </button>
               </div>
             </div>
           )}
 
-          {/* 리스트 테이블 */}
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  {['품목코드','품목명','강종','규격','단중(kg/m)','안전재고','현재고','작업'].map(h => (
+                  {['코드','품목명','강종','규격','단중','안전재고','작성자','작성일','작업'].map(h => (
                     <th key={h} className="px-4 py-3 text-xs font-semibold text-gray-600 border-b text-left">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {items.length === 0 && (
-                  <tr><td colSpan={8} className="text-center py-10 text-gray-400 text-sm">등록된 품목이 없습니다.</td></tr>
+                  <tr><td colSpan={9} className="text-center py-10 text-gray-400 text-sm">등록된 품목이 없습니다</td></tr>
                 )}
-                {items.map(item => (
-                  <tr key={item.id} className="border-b hover:bg-gray-50">
-                    <td className="px-4 py-3 mono text-blue-600 text-sm font-semibold">{item.code}</td>
-                    <td className="px-4 py-3 text-sm font-semibold text-gray-800">{item.name}</td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                        item.steeltype === '1' ? 'bg-blue-100 text-blue-700' :
-                        item.steeltype === '0' ? 'bg-purple-100 text-purple-700' :
-                        'bg-gray-100 text-gray-600'
-                      }`}>{catLabel(item.steeltype)}</span>
+                {items.map(i => (
+                  <tr key={i.id} className="border-b hover:bg-gray-50">
+                    <td className="px-4 py-3 mono text-blue-600 text-sm font-semibold">{i.code}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-800">{i.name}</td>
+                    <td className="px-4 py-3 text-xs text-gray-600">{stName(i.steeltype)}</td>
+                    <td className="px-4 py-3 text-xs mono text-gray-600">{i.spec||'-'}</td>
+                    <td className="px-4 py-3 text-xs text-right text-gray-600">{i.unit_weight||'-'}</td>
+                    <td className="px-4 py-3 text-xs text-right text-gray-600">{i.safety_stock||0}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{i.created_by||'-'}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">
+                      {i.created_at ? new Date(i.created_at).toLocaleDateString('ko-KR') : '-'}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{item.spec || '-'}</td>
-                    <td className="px-4 py-3 text-right mono text-sm">{item.unitWeight ? item.unitWeight.toFixed(3) : '-'}</td>
-                    <td className="px-4 py-3 text-right mono text-sm text-gray-600">{item.safetyStock || 0}</td>
-                    <td className={`px-4 py-3 text-right mono text-sm font-semibold ${
-                      (item.currentStock||0) < (item.safetyStock||0) ? 'text-red-600' : 'text-green-600'
-                    }`}>{item.currentStock || 0}</td>
-                    <td className="px-4 py-3 flex gap-3">
-                      <button onClick={() => openEdit(item)} className="text-blue-600 hover:text-blue-800 text-xs font-semibold">수정</button>
-                      <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:text-red-700 text-xs font-semibold">삭제</button>
+                    <td className="px-4 py-3 flex gap-2">
+                      <button onClick={() => openEdit(i)} 
+                        className="text-blue-600 hover:text-blue-800 text-xs font-semibold">
+                        수정
+                      </button>
+                      <button onClick={() => handleDelete(i.id)} 
+                        className="text-red-500 hover:text-red-700 text-xs font-semibold">
+                        삭제
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -905,78 +1220,171 @@
       );
     }
 
-    // 업체코드
     function Vendors() {
-      const [vendors, setVendors]     = useState(storage.get('vendors') || []);
-      const steeltypes                = storage.get('steeltypes') || [];
-      const [showForm, setShowForm]   = useState(false);
-      const [editItem, setEditItem]   = useState(null);
-      const emptyForm = { code: '', name: '', steeltype: '', tel: '', person: '', notes: '' };
-      const [formData, setFormData]   = useState(emptyForm);
+      const [vendors, setVendors] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [showForm, setShowForm] = useState(false);
+      const [editItem, setEditItem] = useState(null);
+      const emptyForm = { code: '', name: '', tel: '', person: '', notes: '' };
+      const [formData, setFormData] = useState(emptyForm);
 
-      // ── 코드 자동생성 ──────────────────────────────────
-      // 규칙: VEN-001, VEN-002 … 기존 코드 중 숫자 최대값 +1
+      // 현재 로그인 사용자
+      const [currentUser, setCurrentUser] = useState(null);
+
+      useEffect(() => {
+        loadData();
+        getCurrentUser();
+      }, []);
+
+      const getCurrentUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        setCurrentUser(user);
+      };
+
+      const loadData = async () => {
+        setLoading(true);
+        try {
+          const { data, error } = await supabase
+            .from('vendors')
+            .select('*')
+            .order('code');
+          
+          if (error) throw error;
+          setVendors(data || []);
+        } catch (err) {
+          console.error('데이터 로드 실패:', err);
+          alert('데이터를 불러오는데 실패했습니다: ' + err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
       const genCode = () => {
         let max = 0;
         vendors.forEach(v => {
           const m = (v.code || '').match(/^VEN-(\d+)$/);
-          if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+          if (m) { 
+            const n = parseInt(m[1], 10); 
+            if (n > max) max = n; 
+          }
         });
         return 'VEN-' + String(max + 1).padStart(3, '0');
       };
 
-      // ── 폼 열기 ─────────────────────────────────────────
       const openAdd = () => {
         setEditItem(null);
         setFormData({ ...emptyForm, code: genCode() });
         setShowForm(true);
       };
+
       const openEdit = (item) => {
         setEditItem(item);
         setFormData({
           code: item.code,
           name: item.name,
-          steeltype: item.steeltype || '',
           tel: item.tel || '',
           person: item.person || '',
           notes: item.notes || ''
         });
         setShowForm(true);
       };
-      const cancel = () => { setShowForm(false); setEditItem(null); setFormData(emptyForm); };
 
-      // ── 저장 ────────────────────────────────────────────
-      const handleSave = () => {
-        if (!formData.name.trim())    { alert('업체명은 필수항목입니다'); return; }
-        if (!formData.steeltype)      { alert('업체구분은 필수항목입니다'); return; }
-        // 코드 중복 체크 (신규만)
-        if (!editItem && vendors.find(v => v.code === formData.code)) { alert('코드가 중복됩니다'); return; }
-        let newList;
-        if (editItem) {
-          newList = vendors.map(v => v.id === editItem.id ? { ...v, ...formData } : v);
-        } else {
-          newList = [...vendors, { id: 'V' + Date.now(), ...formData, active: true }];
+      const cancel = () => { 
+        setShowForm(false); 
+        setEditItem(null); 
+        setFormData(emptyForm); 
+      };
+
+      const handleSave = async () => {
+        if (!formData.name.trim()) { 
+          alert('업체명은 필수항목입니다'); 
+          return; 
         }
-        setVendors(newList);
-        storage.set('vendors', newList);
-        cancel();
+
+        if (!editItem && vendors.find(v => v.code === formData.code)) { 
+          alert('코드가 중복됩니다'); 
+          return; 
+        }
+
+        try {
+          const now = new Date().toISOString();
+          
+          if (editItem) {
+            // 수정
+            const { error } = await supabase
+              .from('vendors')
+              .update({
+                ...formData,
+                updated_by: currentUser?.email,
+                updated_at: now
+              })
+              .eq('id', editItem.id);
+            
+            if (error) throw error;
+            alert('수정되었습니다');
+          } else {
+            // 신규
+            const { error } = await supabase
+              .from('vendors')
+              .insert([{
+                id: 'V' + Date.now(),
+                ...formData,
+                active: true,
+                created_by: currentUser?.email,
+                created_at: now
+              }]);
+            
+            if (error) throw error;
+            alert('등록되었습니다');
+          }
+
+          cancel();
+          loadData();
+        } catch (err) {
+          console.error('저장 실패:', err);
+          alert('저장에 실패했습니다: ' + err.message);
+        }
       };
 
-      const handleDelete = (id) => {
+      const handleDelete = async (id) => {
         if (!confirm('삭제하시겠습니까?')) return;
-        const newList = vendors.filter(v => v.id !== id);
-        setVendors(newList);
-        storage.set('vendors', newList);
+
+        try {
+          const { error } = await supabase
+            .from('vendors')
+            .delete()
+            .eq('id', id);
+          
+          if (error) throw error;
+          alert('삭제되었습니다');
+          loadData();
+        } catch (err) {
+          console.error('삭제 실패:', err);
+          alert('삭제에 실패했습니다: ' + err.message);
+        }
       };
 
-      // ── Toolbar 데이터 ──────────────────────────────────
-      const stName = code => (steeltypes.find(s => s.code === code) || {}).name || '';
-      const tHeaders = ['코드','업체명','업체구분','연락처','담당자'];
-      const tRows    = vendors.map(v => [v.code, v.name, stName(v.steeltype), v.tel||'-', v.person||'-']);
+      const tHeaders = ['코드','업체명','연락처','담당자','작성자','작성일'];
+      const tRows = vendors.map(v => [
+        v.code, 
+        v.name, 
+        v.tel||'-', 
+        v.person||'-',
+        v.created_by || '-',
+        v.created_at ? new Date(v.created_at).toLocaleDateString('ko-KR') : '-'
+      ]);
+
+      if (loading) {
+        return (
+          <div className="text-center py-20">
+            <div className="text-4xl mb-4">⏳</div>
+            <div className="text-gray-600">데이터를 불러오는 중...</div>
+          </div>
+        );
+      }
 
       return (
         <div className="space-y-5">
-          {/* Toolbar */}
           <Toolbar
             title="업체코드"
             subtitle="협력업체 코드 등록 및 관리"
@@ -986,47 +1394,39 @@
             onExcelUpload={() => alert('엑셀 업로드 기능은 추후 구현됩니다')}
           >
             {!showForm && (
-              <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold btn-primary">+ 추가</button>
+              <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold btn-primary">
+                + 추가
+              </button>
             )}
           </Toolbar>
 
-          {/* 추가 / 수정 폼 */}
           {showForm && (
             <div className="bg-white p-5 rounded-xl border shadow-sm">
               <h3 className="text-sm font-bold text-gray-700 mb-4 border-b pb-2">
                 {editItem ? '업체코드 수정' : '업체코드 추가'}
               </h3>
-              <div className="grid grid-cols-5 gap-4">
-                {/* 코드 — 자동생성 / 수정시 disabled */}
+              <div className="grid grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">코드 <span className="text-gray-400 font-normal">(자동생성)</span></label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    코드 <span className="text-gray-400 font-normal">(자동생성)</span>
+                  </label>
                   <input type="text" value={formData.code} readOnly
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100 text-gray-500 mono cursor-not-allowed" />
                 </div>
-                {/* 업체명 — 필수 */}
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">업체명 <span className="text-red-500">*</span></label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    업체명 <span className="text-red-500">*</span>
+                  </label>
                   <input type="text" value={formData.name} placeholder="예: SMS Steel"
                     onChange={e => setFormData({...formData, name: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
                 </div>
-                {/* 업체구분 — 강종코드 드롭다운 */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">업체구분 <span className="text-red-500">*</span></label>
-                  <select value={formData.steeltype} onChange={e => setFormData({...formData, steeltype: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50">
-                    <option value="">-- 선택 --</option>
-                    {steeltypes.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
-                  </select>
-                </div>
-                {/* 연락처 */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">연락처</label>
                   <input type="text" value={formData.tel} placeholder="예: 051-1234-5678"
                     onChange={e => setFormData({...formData, tel: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
                 </div>
-                {/* 담당자 */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">담당자</label>
                   <input type="text" value={formData.person} placeholder="예: 김철수"
@@ -1034,45 +1434,53 @@
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
                 </div>
               </div>
+              <div className="mt-4">
+                <label className="block text-xs font-semibold text-gray-600 mb-1">비고</label>
+                <textarea value={formData.notes} placeholder="비고 사항 입력"
+                  onChange={e => setFormData({...formData, notes: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" rows={2} />
+              </div>
               <div className="flex justify-end gap-2 mt-4">
-                <button onClick={cancel}     className="px-4 py-1.5 rounded-lg border text-sm text-gray-600 hover:bg-gray-100">취소</button>
-                <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg text-sm font-semibold btn-primary">저장</button>
+                <button onClick={cancel} className="px-4 py-1.5 rounded-lg border text-sm text-gray-600 hover:bg-gray-100">
+                  취소
+                </button>
+                <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg text-sm font-semibold btn-primary">
+                  저장
+                </button>
               </div>
             </div>
           )}
 
-          {/* 리스트 테이블 */}
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  {['코드','업체명','업체구분','연락처','담당자','작업'].map(h => (
+                  {['코드','업체명','연락처','담당자','작성자','작성일','작업'].map(h => (
                     <th key={h} className="px-5 py-3 text-xs font-semibold text-gray-600 border-b text-left">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {vendors.length === 0 && (
-                  <tr><td colSpan={6} className="text-center py-10 text-gray-400 text-sm">등록된 업체가 없습니다.</td></tr>
+                  <tr><td colSpan={7} className="text-center py-10 text-gray-400 text-sm">등록된 업체가 없습니다.</td></tr>
                 )}
                 {vendors.map(v => (
                   <tr key={v.id} className="border-b hover:bg-gray-50">
                     <td className="px-5 py-3 mono text-blue-600 text-sm font-semibold">{v.code}</td>
                     <td className="px-5 py-3 text-sm font-semibold text-gray-800">{v.name}</td>
-                    <td className="px-5 py-3">
-                      {v.steeltype ? (
-                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                          stName(v.steeltype) === '형강' ? 'bg-purple-100 text-purple-700' :
-                          stName(v.steeltype) === '철판' ? 'bg-blue-100 text-blue-700' :
-                          'bg-gray-100 text-gray-600'
-                        }`}>{stName(v.steeltype)}</span>
-                      ) : <span className="text-xs text-gray-400">-</span>}
-                    </td>
                     <td className="px-5 py-3 text-sm text-gray-600">{v.tel || '-'}</td>
                     <td className="px-5 py-3 text-sm text-gray-600">{v.person || '-'}</td>
+                    <td className="px-5 py-3 text-xs text-gray-500">{v.created_by || '-'}</td>
+                    <td className="px-5 py-3 text-xs text-gray-500">
+                      {v.created_at ? new Date(v.created_at).toLocaleDateString('ko-KR') : '-'}
+                    </td>
                     <td className="px-5 py-3 flex gap-3">
-                      <button onClick={() => openEdit(v)} className="text-blue-600 hover:text-blue-800 text-xs font-semibold">수정</button>
-                      <button onClick={() => handleDelete(v.id)} className="text-red-500 hover:text-red-700 text-xs font-semibold">삭제</button>
+                      <button onClick={() => openEdit(v)} className="text-blue-600 hover:text-blue-800 text-xs font-semibold">
+                        수정
+                      </button>
+                      <button onClick={() => handleDelete(v.id)} className="text-red-500 hover:text-red-700 text-xs font-semibold">
+                        삭제
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1082,90 +1490,246 @@
         </div>
       );
     }
-
-    // ========== 창고코드 ==========
+    // ========== Warehouses 컴포넌트 - Supabase + 자동 로그 ==========
     function Warehouses() {
-      const [list, setList] = useState(storage.get('warehouses') || []);
+      const [warehouses, setWarehouses] = useState([]);
+      const [loading, setLoading] = useState(true);
       const [showForm, setShowForm] = useState(false);
       const [editItem, setEditItem] = useState(null);
-      const emptyForm = { code:'', name:'', notes:'' };
+      const emptyForm = { code: '', name: '' };
       const [formData, setFormData] = useState(emptyForm);
+      const [currentUser, setCurrentUser] = useState(null);
 
-      const openAdd  = () => { setEditItem(null); setFormData(emptyForm); setShowForm(true); };
-      const openEdit = (item) => { setEditItem(item); setFormData({code:item.code, name:item.name, notes:item.notes||''}); setShowForm(true); };
+      useEffect(() => {
+        loadData();
+        getCurrentUser();
+      }, []);
 
-      const handleSave = () => {
-        if (!formData.code || !formData.name) { alert('코드와 창고명을 입력하세요'); return; }
-        if (!editItem && list.find(w => w.code === formData.code)) { alert('중복된 코드입니다'); return; }
-        const newList = editItem
-          ? list.map(w => w.id === editItem.id ? {...w, ...formData} : w)
-          : [...list, { id:'W'+Date.now(), ...formData, active:true }];
-        setList(newList); storage.set('warehouses', newList); setShowForm(false);
+      const getCurrentUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        setCurrentUser(user);
       };
 
-      const handleDelete = (id) => {
+      const loadData = async () => {
+        setLoading(true);
+        try {
+          const { data, error } = await supabase
+            .from('warehouses')
+            .select('*')
+            .is('deleted_at', null)
+            .order('code');
+          
+          if (error) throw error;
+          setWarehouses(data || []);
+        } catch (err) {
+          console.error('데이터 로드 실패:', err);
+          alert('데이터를 불러오는데 실패했습니다: ' + err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const genCode = () => {
+        let max = 0;
+        warehouses.forEach(w => {
+          const m = (w.code || '').match(/^WH-(\d+)$/);
+          if (m) { 
+            const n = parseInt(m[1], 10); 
+            if (n > max) max = n; 
+          }
+        });
+        return 'WH-' + String(max + 1).padStart(3, '0');
+      };
+
+      const openAdd = () => { 
+        setEditItem(null); 
+        setFormData({...emptyForm, code: genCode()}); 
+        setShowForm(true); 
+      };
+      
+      const openEdit = (item) => { 
+        setEditItem(item); 
+        setFormData({code: item.code, name: item.name}); 
+        setShowForm(true); 
+      };
+      
+      const cancel = () => { 
+        setShowForm(false); 
+        setEditItem(null); 
+        setFormData(emptyForm); 
+      };
+
+      const handleSave = async () => {
+        if (!formData.name.trim()) { 
+          alert('창고명은 필수항목입니다'); 
+          return; 
+        }
+
+        if (!editItem && warehouses.find(w => w.code === formData.code)) { 
+          alert('코드가 중복됩니다'); 
+          return; 
+        }
+
+        try {
+          const now = new Date().toISOString();
+          
+          if (editItem) {
+            const { error } = await supabase
+              .from('warehouses')
+              .update({
+                ...formData,
+                updated_by: currentUser?.email,
+                updated_at: now
+              })
+              .eq('id', editItem.id);
+            
+            if (error) throw error;
+            alert('수정되었습니다');
+          } else {
+            const { error } = await supabase
+              .from('warehouses')
+              .insert([{
+                id: 'W' + Date.now(),
+                ...formData,
+                active: true,
+                created_by: currentUser?.email,
+                created_at: now
+              }]);
+            
+            if (error) throw error;
+            alert('등록되었습니다');
+          }
+
+          cancel();
+          loadData();
+        } catch (err) {
+          console.error('저장 실패:', err);
+          alert('저장에 실패했습니다: ' + err.message);
+        }
+      };
+
+      const handleDelete = async (id) => {
         if (!confirm('삭제하시겠습니까?')) return;
-        const n = list.filter(w => w.id !== id);
-        setList(n); storage.set('warehouses', n);
+
+        try {
+          const now = new Date().toISOString();
+          const { error } = await supabase
+            .from('warehouses')
+            .update({
+              active: false,
+              deleted_by: currentUser?.email,
+              deleted_at: now
+            })
+            .eq('id', id);
+          
+          if (error) throw error;
+          alert('삭제되었습니다');
+          loadData();
+        } catch (err) {
+          console.error('삭제 실패:', err);
+          alert('삭제에 실패했습니다: ' + err.message);
+        }
       };
+
+      const tHeaders = ['코드','창고명','작성자','작성일'];
+      const tRows = warehouses.map(w => [
+        w.code, 
+        w.name,
+        w.created_by || '-',
+        w.created_at ? new Date(w.created_at).toLocaleDateString('ko-KR') : '-'
+      ]);
+
+      if (loading) {
+        return (
+          <div className="text-center py-20">
+            <div className="text-4xl mb-4">⏳</div>
+            <div className="text-gray-600">데이터를 불러오는 중...</div>
+          </div>
+        );
+      }
 
       return (
         <div className="space-y-5">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800">창고코드</h1>
-              <p className="text-gray-500 mt-1">창고 및 보관 장소 코드 관리</p>
-            </div>
-            <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-semibold btn-primary">+ 추가</button>
-          </div>
+          <Toolbar 
+            title="창고코드" 
+            subtitle="창고 등록 및 관리"
+            onPrint={() => printPage('창고코드', tHeaders, tRows)}
+            onExcelDown={() => excelDown(tRows, tHeaders, '창고코드')}
+            onPdfDown={() => pdfDown('창고코드', tHeaders, tRows, '창고코드')}
+            onExcelUpload={() => alert('엑셀 업로드 기능은 추후 구현됩니다')}
+          >
+            {!showForm && (
+              <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold btn-primary">
+                + 추가
+              </button>
+            )}
+          </Toolbar>
 
           {showForm && (
             <div className="bg-white p-5 rounded-xl border shadow-sm">
-              <h2 className="text-base font-bold text-gray-800 mb-3">{editItem ? '창고코드 수정' : '창고코드 추가'}</h2>
-              <div className="flex gap-3 items-end">
-                <div className="w-40">
+              <h3 className="text-sm font-bold text-gray-700 mb-4 border-b pb-2">
+                {editItem ? '창고 수정' : '창고 추가'}
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">코드</label>
-                  <input type="text" value={formData.code} disabled={!!editItem}
-                    onChange={e => setFormData({...formData, code:e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 disabled:bg-gray-100" />
+                  <input type="text" value={formData.code} 
+                    onChange={e => setFormData({...formData, code: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 mono" 
+                    placeholder="예: 1, 70001" />
                 </div>
-                <div className="w-56">
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">창고명</label>
-                  <input type="text" value={formData.name}
-                    onChange={e => setFormData({...formData, name:e.target.value})}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    창고명 <span className="text-red-500">*</span>
+                  </label>
+                  <input type="text" value={formData.name} placeholder="예: LKS"
+                    onChange={e => setFormData({...formData, name: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
                 </div>
-                <div className="flex-1">
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">비고</label>
-                  <input type="text" value={formData.notes}
-                    onChange={e => setFormData({...formData, notes:e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
-                </div>
-                <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm btn-primary">저장</button>
-                <button onClick={() => setShowForm(false)} className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg text-sm">취소</button>
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button onClick={cancel} 
+                  className="px-4 py-1.5 rounded-lg border text-sm text-gray-600 hover:bg-gray-100">
+                  취소
+                </button>
+                <button onClick={handleSave} 
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg text-sm font-semibold btn-primary">
+                  저장
+                </button>
               </div>
             </div>
           )}
 
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <table className="w-full">
-              <thead className="bg-gray-50 border-b">
+              <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-5 py-3 text-left text-xs font-semibold text-gray-600">코드</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold text-gray-600">창고명</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold text-gray-600">비고</th>
-                  <th className="px-5 py-3 text-center text-xs font-semibold text-gray-600">작업</th>
+                  {['코드','창고명','작성자','작성일','작업'].map(h => (
+                    <th key={h} className="px-5 py-3 text-xs font-semibold text-gray-600 border-b text-left">{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {list.map(w => (
+                {warehouses.length === 0 && (
+                  <tr><td colSpan={5} className="text-center py-10 text-gray-400 text-sm">등록된 창고가 없습니다</td></tr>
+                )}
+                {warehouses.map(w => (
                   <tr key={w.id} className="border-b hover:bg-gray-50">
                     <td className="px-5 py-3 mono text-blue-600 text-sm font-semibold">{w.code}</td>
-                    <td className="px-5 py-3 text-sm font-semibold">{w.name}</td>
-                    <td className="px-5 py-3 text-sm text-gray-500">{w.notes || '-'}</td>
-                    <td className="px-5 py-3 text-center">
-                      <button onClick={() => openEdit(w)} className="text-blue-600 hover:text-blue-800 mr-3 text-sm">수정</button>
-                      <button onClick={() => handleDelete(w.id)} className="text-red-500 hover:text-red-700 text-sm">삭제</button>
+                    <td className="px-5 py-3 text-sm font-semibold text-gray-800">{w.name}</td>
+                    <td className="px-5 py-3 text-xs text-gray-500">{w.created_by||'-'}</td>
+                    <td className="px-5 py-3 text-xs text-gray-500">
+                      {w.created_at ? new Date(w.created_at).toLocaleDateString('ko-KR') : '-'}
+                    </td>
+                    <td className="px-5 py-3 flex gap-3">
+                      <button onClick={() => openEdit(w)} 
+                        className="text-blue-600 hover:text-blue-800 text-xs font-semibold">
+                        수정
+                      </button>
+                      <button onClick={() => handleDelete(w.id)} 
+                        className="text-red-500 hover:text-red-700 text-xs font-semibold">
+                        삭제
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1176,101 +1740,244 @@
       );
     }
 
-    // ========== 프로젝트 ==========
     function ProjectManage() {
-      const [list, setList] = useState(storage.get('projects') || []);
+      const [projects, setProjects] = useState([]);
+      const [loading, setLoading] = useState(true);
       const [showForm, setShowForm] = useState(false);
       const [editItem, setEditItem] = useState(null);
-      const emptyForm = { code:'', name:'', notes:'' };
+      const emptyForm = { code: '', name: '' };
       const [formData, setFormData] = useState(emptyForm);
+      const [currentUser, setCurrentUser] = useState(null);
 
-      const openAdd  = () => { setEditItem(null); setFormData(emptyForm); setShowForm(true); };
-      const openEdit = (item) => { setEditItem(item); setFormData({code:item.code, name:item.name, notes:item.notes||''}); setShowForm(true); };
+      useEffect(() => {
+        loadData();
+        getCurrentUser();
+      }, []);
 
-      const handleSave = () => {
-        if (!formData.code || !formData.name) { alert('프로젝트코드와 호선명을 입력하세요'); return; }
-        if (!editItem && list.find(p => p.code === formData.code)) { alert('중복된 코드입니다'); return; }
-        const newList = editItem
-          ? list.map(p => p.id === editItem.id ? {...p, ...formData} : p)
-          : [...list, { id:'P'+Date.now(), ...formData, active:true }];
-        setList(newList); storage.set('projects', newList); setShowForm(false);
+      const getCurrentUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        setCurrentUser(user);
       };
 
-      const handleDelete = (id) => {
+      const loadData = async () => {
+        setLoading(true);
+        try {
+          const { data, error } = await supabase
+            .from('projects')
+            .select('*')
+            .is('deleted_at', null)
+            .order('code');
+          
+          if (error) throw error;
+          setProjects(data || []);
+        } catch (err) {
+          console.error('데이터 로드 실패:', err);
+          alert('데이터를 불러오는데 실패했습니다: ' + err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const genCode = () => {
+        let max = 0;
+        projects.forEach(p => {
+          const m = (p.code || '').match(/^S-\d{4}-(\d+)$/);
+          if (m) { 
+            const n = parseInt(m[1], 10); 
+            if (n > max) max = n; 
+          }
+        });
+        const year = new Date().getFullYear();
+        return `S-${year}-` + String(max + 1).padStart(3, '0');
+      };
+
+      const openAdd = () => { 
+        setEditItem(null); 
+        setFormData({...emptyForm, code: genCode()}); 
+        setShowForm(true); 
+      };
+      
+      const openEdit = (item) => { 
+        setEditItem(item); 
+        setFormData({code: item.code, name: item.name}); 
+        setShowForm(true); 
+      };
+      
+      const cancel = () => { 
+        setShowForm(false); 
+        setEditItem(null); 
+        setFormData(emptyForm); 
+      };
+
+      const handleSave = async () => {
+        if (!formData.name.trim()) { 
+          alert('프로젝트명은 필수항목입니다'); 
+          return; 
+        }
+
+        if (!editItem && projects.find(p => p.code === formData.code)) { 
+          alert('코드가 중복됩니다'); 
+          return; 
+        }
+
+        try {
+          const now = new Date().toISOString();
+          
+          if (editItem) {
+            const { error } = await supabase
+              .from('projects')
+              .update({
+                ...formData,
+                updated_by: currentUser?.email,
+                updated_at: now
+              })
+              .eq('id', editItem.id);
+            
+            if (error) throw error;
+            alert('수정되었습니다');
+          } else {
+            const { error } = await supabase
+              .from('projects')
+              .insert([{
+                id: 'P' + Date.now(),
+                ...formData,
+                active: true,
+                created_by: currentUser?.email,
+                created_at: now
+              }]);
+            
+            if (error) throw error;
+            alert('등록되었습니다');
+          }
+
+          cancel();
+          loadData();
+        } catch (err) {
+          console.error('저장 실패:', err);
+          alert('저장에 실패했습니다: ' + err.message);
+        }
+      };
+
+      const handleDelete = async (id) => {
         if (!confirm('삭제하시겠습니까?')) return;
-        const n = list.filter(p => p.id !== id);
-        setList(n); storage.set('projects', n);
+
+        try {
+          const now = new Date().toISOString();
+          const { error } = await supabase
+            .from('projects')
+            .update({
+              active: false,
+              deleted_by: currentUser?.email,
+              deleted_at: now
+            })
+            .eq('id', id);
+          
+          if (error) throw error;
+          alert('삭제되었습니다');
+          loadData();
+        } catch (err) {
+          console.error('삭제 실패:', err);
+          alert('삭제에 실패했습니다: ' + err.message);
+        }
       };
 
-      const toggleActive = (id) => {
-        const n = list.map(p => p.id === id ? {...p, active:!p.active} : p);
-        setList(n); storage.set('projects', n);
-      };
+      const tHeaders = ['코드','프로젝트명','작성자','작성일'];
+      const tRows = projects.map(p => [
+        p.code, 
+        p.name,
+        p.created_by || '-',
+        p.created_at ? new Date(p.created_at).toLocaleDateString('ko-KR') : '-'
+      ]);
+
+      if (loading) {
+        return (
+          <div className="text-center py-20">
+            <div className="text-4xl mb-4">⏳</div>
+            <div className="text-gray-600">데이터를 불러오는 중...</div>
+          </div>
+        );
+      }
 
       return (
         <div className="space-y-5">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800">프로젝트</h1>
-              <p className="text-gray-500 mt-1">호선별 프로젝트 등록 및 관리</p>
-            </div>
-            <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-semibold btn-primary">+ 추가</button>
-          </div>
+          <Toolbar 
+            title="프로젝트" 
+            subtitle="프로젝트 등록 및 관리"
+            onPrint={() => printPage('프로젝트', tHeaders, tRows)}
+            onExcelDown={() => excelDown(tRows, tHeaders, '프로젝트')}
+            onPdfDown={() => pdfDown('프로젝트', tHeaders, tRows, '프로젝트')}
+            onExcelUpload={() => alert('엑셀 업로드 기능은 추후 구현됩니다')}
+          >
+            {!showForm && (
+              <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold btn-primary">
+                + 추가
+              </button>
+            )}
+          </Toolbar>
 
           {showForm && (
             <div className="bg-white p-5 rounded-xl border shadow-sm">
-              <h2 className="text-base font-bold text-gray-800 mb-3">{editItem ? '프로젝트 수정' : '프로젝트 추가'}</h2>
-              <div className="flex gap-3 items-end">
-                <div className="w-44">
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">프로젝트코드</label>
-                  <input type="text" value={formData.code} disabled={!!editItem}
-                    onChange={e => setFormData({...formData, code:e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 disabled:bg-gray-100" placeholder="S-2025-001" />
+              <h3 className="text-sm font-bold text-gray-700 mb-4 border-b pb-2">
+                {editItem ? '프로젝트 수정' : '프로젝트 추가'}
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">코드</label>
+                  <input type="text" value={formData.code} readOnly 
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100 text-gray-500 mono cursor-not-allowed" />
                 </div>
-                <div className="w-56">
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">호선명</label>
-                  <input type="text" value={formData.name}
-                    onChange={e => setFormData({...formData, name:e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" placeholder="A호선" />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">비고</label>
-                  <input type="text" value={formData.notes}
-                    onChange={e => setFormData({...formData, notes:e.target.value})}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    프로젝트명 <span className="text-red-500">*</span>
+                  </label>
+                  <input type="text" value={formData.name} placeholder="예: A호선"
+                    onChange={e => setFormData({...formData, name: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
                 </div>
-                <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm btn-primary">저장</button>
-                <button onClick={() => setShowForm(false)} className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg text-sm">취소</button>
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button onClick={cancel} 
+                  className="px-4 py-1.5 rounded-lg border text-sm text-gray-600 hover:bg-gray-100">
+                  취소
+                </button>
+                <button onClick={handleSave} 
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg text-sm font-semibold btn-primary">
+                  저장
+                </button>
               </div>
             </div>
           )}
 
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <table className="w-full">
-              <thead className="bg-gray-50 border-b">
+              <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-5 py-3 text-left text-xs font-semibold text-gray-600">프로젝트코드</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold text-gray-600">호선명</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold text-gray-600">비고</th>
-                  <th className="px-5 py-3 text-center text-xs font-semibold text-gray-600">상태</th>
-                  <th className="px-5 py-3 text-center text-xs font-semibold text-gray-600">작업</th>
+                  {['코드','프로젝트명','작성자','작성일','작업'].map(h => (
+                    <th key={h} className="px-5 py-3 text-xs font-semibold text-gray-600 border-b text-left">{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {list.map(p => (
+                {projects.length === 0 && (
+                  <tr><td colSpan={5} className="text-center py-10 text-gray-400 text-sm">등록된 프로젝트가 없습니다</td></tr>
+                )}
+                {projects.map(p => (
                   <tr key={p.id} className="border-b hover:bg-gray-50">
                     <td className="px-5 py-3 mono text-blue-600 text-sm font-semibold">{p.code}</td>
-                    <td className="px-5 py-3 text-sm font-semibold">{p.name}</td>
-                    <td className="px-5 py-3 text-sm text-gray-500">{p.notes || '-'}</td>
-                    <td className="px-5 py-3 text-center">
-                      <button onClick={() => toggleActive(p.id)}
-                        className={`px-3 py-0.5 rounded-full text-xs font-semibold transition ${
-                          p.active ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                        }`}>{p.active ? '진행중' : '완료'}</button>
+                    <td className="px-5 py-3 text-sm font-semibold text-gray-800">{p.name}</td>
+                    <td className="px-5 py-3 text-xs text-gray-500">{p.created_by||'-'}</td>
+                    <td className="px-5 py-3 text-xs text-gray-500">
+                      {p.created_at ? new Date(p.created_at).toLocaleDateString('ko-KR') : '-'}
                     </td>
-                    <td className="px-5 py-3 text-center">
-                      <button onClick={() => openEdit(p)} className="text-blue-600 hover:text-blue-800 mr-3 text-sm">수정</button>
-                      <button onClick={() => handleDelete(p.id)} className="text-red-500 hover:text-red-700 text-sm">삭제</button>
+                    <td className="px-5 py-3 flex gap-3">
+                      <button onClick={() => openEdit(p)} 
+                        className="text-blue-600 hover:text-blue-800 text-xs font-semibold">
+                        수정
+                      </button>
+                      <button onClick={() => handleDelete(p.id)} 
+                        className="text-red-500 hover:text-red-700 text-xs font-semibold">
+                        삭제
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1281,8 +1988,6 @@
       );
     }
 
-    // 나머지 빈 화면들
-    // ==================== 강종코드 ====================
     function SteelType() {
       const [steeltypes, setSteeltypes] = useState(storage.get('steeltypes') || []);
       const [showForm, setShowForm] = useState(false);
@@ -1377,157 +2082,263 @@
     }
 
     // ========== 결재자관리 ==========
+    // ========== Approvers 컴포넌트 - Supabase + 자동 로그 ==========
     function Approvers() {
-      // 초기 샘플 데이터
-      const initData = () => {
-        const existing = storage.get('approvers');
-        if (existing) return existing;
-        const samples = [
-          { id: 'APR001', role: 'approver',  name: 'Kris',  email: 'khwun@sms-sme.com' },
-          { id: 'APR002', role: 'payment',   name: 'Mandy', email: 'accounting@sms-sme.com' }
-        ];
-        storage.set('approvers', samples);
-        return samples;
-      };
-
-      const [list, setList]         = useState(initData);
+      const [approvers, setApprovers] = useState([]);
+      const [loading, setLoading] = useState(true);
       const [showForm, setShowForm] = useState(false);
       const [editItem, setEditItem] = useState(null);
-      const emptyForm = { role: 'approver', name: '', email: '' };
-      const [form, setForm]         = useState(emptyForm);
+      const emptyForm = { role: '', name: '', email: '' };
+      const [formData, setFormData] = useState(emptyForm);
+      const [currentUser, setCurrentUser] = useState(null);
 
-      const save = (list) => { setList(list); storage.set('approvers', list); };
+      useEffect(() => {
+        loadData();
+        getCurrentUser();
+      }, []);
 
-      const openAdd  = () => { setEditItem(null); setForm(emptyForm); setShowForm(true); };
-      const openEdit = (item) => { setEditItem(item); setForm({ role: item.role, name: item.name, email: item.email }); setShowForm(true); };
-      const cancel   = () => { setShowForm(false); setEditItem(null); setForm(emptyForm); };
-
-      const handleSave = () => {
-        if (!form.name.trim())  { alert('이름을 입력하세요'); return; }
-        if (!form.email.trim()) { alert('이메일을 입력하세요'); return; }
-        // 이메일 중복 체크 (자신 제외)
-        if (list.some(a => a.email === form.email && (!editItem || a.id !== editItem.id))) {
-          alert('이미 등록된 이메일입니다'); return;
-        }
-        if (editItem) {
-          save(list.map(a => a.id === editItem.id ? { ...a, ...form } : a));
-        } else {
-          const newId = 'APR' + String(list.length + 1).padStart(3, '0');
-          save([...list, { id: newId, ...form }]);
-        }
-        cancel();
+      const getCurrentUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        setCurrentUser(user);
       };
 
-      const handleDelete = (id) => {
+      const loadData = async () => {
+        setLoading(true);
+        try {
+          const { data, error } = await supabase
+            .from('approvers')
+            .select('*')
+            .is('deleted_at', null)
+            .order('role');
+          
+          if (error) throw error;
+          setApprovers(data || []);
+        } catch (err) {
+          console.error('데이터 로드 실패:', err);
+          alert('데이터를 불러오는데 실패했습니다: ' + err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const openAdd = () => { 
+        setEditItem(null); 
+        setFormData(emptyForm); 
+        setShowForm(true); 
+      };
+      
+      const openEdit = (item) => { 
+        setEditItem(item); 
+        setFormData({role: item.role, name: item.name, email: item.email}); 
+        setShowForm(true); 
+      };
+      
+      const cancel = () => { 
+        setShowForm(false); 
+        setEditItem(null); 
+        setFormData(emptyForm); 
+      };
+
+      const handleSave = async () => {
+        if (!formData.name.trim() || !formData.email.trim()) { 
+          alert('이름과 이메일은 필수항목입니다'); 
+          return; 
+        }
+
+        if (!formData.role) { 
+          alert('역할을 선택해주세요'); 
+          return; 
+        }
+
+        try {
+          const now = new Date().toISOString();
+          
+          if (editItem) {
+            const { error } = await supabase
+              .from('approvers')
+              .update({
+                ...formData,
+                updated_by: currentUser?.email,
+                updated_at: now
+              })
+              .eq('id', editItem.id);
+            
+            if (error) throw error;
+            alert('수정되었습니다');
+          } else {
+            const { error } = await supabase
+              .from('approvers')
+              .insert([{
+                id: 'APR' + Date.now(),
+                ...formData,
+                created_by: currentUser?.email,
+                created_at: now
+              }]);
+            
+            if (error) throw error;
+            alert('등록되었습니다');
+          }
+
+          cancel();
+          loadData();
+        } catch (err) {
+          console.error('저장 실패:', err);
+          alert('저장에 실패했습니다: ' + err.message);
+        }
+      };
+
+      const handleDelete = async (id) => {
         if (!confirm('삭제하시겠습니까?')) return;
-        save(list.filter(a => a.id !== id));
+
+        try {
+          const now = new Date().toISOString();
+          const { error } = await supabase
+            .from('approvers')
+            .update({
+              deleted_by: currentUser?.email,
+              deleted_at: now
+            })
+            .eq('id', id);
+          
+          if (error) throw error;
+          alert('삭제되었습니다');
+          loadData();
+        } catch (err) {
+          console.error('삭제 실패:', err);
+          alert('삭제에 실패했습니다: ' + err.message);
+        }
       };
 
-      // 테이블 데이터
-      const roleLabel = r => r === 'approver' ? '결재자' : '송금요청자';
-      const tHeaders  = ['구분', '이름', '회사이메일'];
-      const tRows     = list.map(a => [roleLabel(a.role), a.name, a.email]);
+      const roleLabel = (role) => {
+        const map = { 
+          'approver': '결재자', 
+          'payment': '송금담당' 
+        };
+        return map[role] || role;
+      };
+
+      const tHeaders = ['역할','이름','이메일','작성자','작성일'];
+      const tRows = approvers.map(a => [
+        roleLabel(a.role),
+        a.name,
+        a.email,
+        a.created_by || '-',
+        a.created_at ? new Date(a.created_at).toLocaleDateString('ko-KR') : '-'
+      ]);
+
+      if (loading) {
+        return (
+          <div className="text-center py-20">
+            <div className="text-4xl mb-4">⏳</div>
+            <div className="text-gray-600">데이터를 불러오는 중...</div>
+          </div>
+        );
+      }
 
       return (
         <div className="space-y-5">
-          {/* Toolbar */}
-          <Toolbar
-            title="결재자관리"
-            subtitle="결재자 및 송금요청자 등록"
+          <Toolbar 
+            title="결재자관리" 
+            subtitle="결재자 및 송금담당자 관리"
             onPrint={() => printPage('결재자관리', tHeaders, tRows)}
             onExcelDown={() => excelDown(tRows, tHeaders, '결재자관리')}
             onPdfDown={() => pdfDown('결재자관리', tHeaders, tRows, '결재자관리')}
             onExcelUpload={() => alert('엑셀 업로드 기능은 추후 구현됩니다')}
           >
             {!showForm && (
-              <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold btn-primary">+ 추가</button>
+              <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold btn-primary">
+                + 추가
+              </button>
             )}
           </Toolbar>
 
-          {/* 역할 안내 */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-start gap-3">
-              <span className="text-lg">✉️</span>
-              <div>
-                <p className="text-sm font-semibold text-blue-700">결재자</p>
-                <p className="text-xs text-blue-500">발주 등록 후 결재요청 시 이메일 수신 → 승낙/반기</p>
-              </div>
-            </div>
-            <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 flex items-start gap-3">
-              <span className="text-lg">🏦</span>
-              <div>
-                <p className="text-sm font-semibold text-indigo-700">송금요청자</p>
-                <p className="text-xs text-indigo-500">선수금 지급·잔금 송금 요청 시 회계팀 이메일 수신</p>
-              </div>
-            </div>
-          </div>
-
-          {/* 추가/수정 폼 */}
           {showForm && (
-            <div className="bg-white p-5 rounded-xl border shadow-sm animate-slide-in">
+            <div className="bg-white p-5 rounded-xl border shadow-sm">
               <h3 className="text-sm font-bold text-gray-700 mb-4 border-b pb-2">
-                {editItem ? '수정' : '추가'} — 결재자 정보
+                {editItem ? '결재자 수정' : '결재자 추가'}
               </h3>
               <div className="grid grid-cols-3 gap-4">
-                {/* 구분 드롭다운 */}
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">구분 <span className="text-red-500">*</span></label>
-                  <select value={form.role} onChange={e => setForm({...form, role: e.target.value})}
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    역할 <span className="text-red-500">*</span>
+                  </label>
+                  <select value={formData.role} 
+                    onChange={e => setFormData({...formData, role: e.target.value})} 
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50">
+                    <option value="">선택</option>
                     <option value="approver">결재자</option>
-                    <option value="payment">송금요청자</option>
+                    <option value="payment">송금담당</option>
                   </select>
                 </div>
-                {/* 이름 */}
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">이름 <span className="text-red-500">*</span></label>
-                  <input type="text" value={form.name} placeholder="예: Kris"
-                    onChange={e => setForm({...form, name: e.target.value})}
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    이름 <span className="text-red-500">*</span>
+                  </label>
+                  <input type="text" value={formData.name} placeholder="예: 김철수"
+                    onChange={e => setFormData({...formData, name: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
                 </div>
-                {/* 회사 이메일 */}
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">회사 이메일 <span className="text-red-500">*</span></label>
-                  <input type="email" value={form.email} placeholder="예: name@company.com"
-                    onChange={e => setForm({...form, email: e.target.value})}
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    이메일 <span className="text-red-500">*</span>
+                  </label>
+                  <input type="email" value={formData.email} placeholder="예: kim@sms-sme.com"
+                    onChange={e => setFormData({...formData, email: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50" />
                 </div>
               </div>
               <div className="flex justify-end gap-2 mt-4">
-                <button onClick={cancel} className="px-4 py-1.5 rounded-lg border text-sm text-gray-600 hover:bg-gray-100">취소</button>
-                <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg text-sm font-semibold btn-primary">
-                  {editItem ? '저장' : '추가'}
+                <button onClick={cancel} 
+                  className="px-4 py-1.5 rounded-lg border text-sm text-gray-600 hover:bg-gray-100">
+                  취소
+                </button>
+                <button onClick={handleSave} 
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg text-sm font-semibold btn-primary">
+                  저장
                 </button>
               </div>
             </div>
           )}
 
-          {/* 리스트 테이블 */}
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  {['구분','이름','회사 이메일','작업'].map(h => (
+                  {['역할','이름','이메일','작성자','작성일','작업'].map(h => (
                     <th key={h} className="px-5 py-3 text-xs font-semibold text-gray-600 border-b text-left">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {list.length === 0 && (
-                  <tr><td colSpan={4} className="text-center py-10 text-gray-400 text-sm">등록된 결재자가 없습니다.</td></tr>
+                {approvers.length === 0 && (
+                  <tr><td colSpan={6} className="text-center py-10 text-gray-400 text-sm">등록된 결재자가 없습니다</td></tr>
                 )}
-                {list.map(a => (
+                {approvers.map(a => (
                   <tr key={a.id} className="border-b hover:bg-gray-50">
                     <td className="px-5 py-3">
-                      <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${a.role === 'approver' ? 'bg-blue-100 text-blue-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                        a.role === 'approver' 
+                          ? 'bg-blue-100 text-blue-700' 
+                          : 'bg-green-100 text-green-700'
+                      }`}>
                         {roleLabel(a.role)}
                       </span>
                     </td>
                     <td className="px-5 py-3 text-sm font-semibold text-gray-800">{a.name}</td>
-                    <td className="px-5 py-3 text-sm text-gray-600 mono">{a.email}</td>
+                    <td className="px-5 py-3 text-sm text-gray-600">{a.email}</td>
+                    <td className="px-5 py-3 text-xs text-gray-500">{a.created_by||'-'}</td>
+                    <td className="px-5 py-3 text-xs text-gray-500">
+                      {a.created_at ? new Date(a.created_at).toLocaleDateString('ko-KR') : '-'}
+                    </td>
                     <td className="px-5 py-3 flex gap-3">
-                      <button onClick={() => openEdit(a)} className="text-blue-600 hover:text-blue-800 text-xs font-semibold">수정</button>
-                      <button onClick={() => handleDelete(a.id)} className="text-red-500 hover:text-red-700 text-xs font-semibold">삭제</button>
+                      <button onClick={() => openEdit(a)} 
+                        className="text-blue-600 hover:text-blue-800 text-xs font-semibold">
+                        수정
+                      </button>
+                      <button onClick={() => handleDelete(a.id)} 
+                        className="text-red-500 hover:text-red-700 text-xs font-semibold">
+                        삭제
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1538,23 +2349,59 @@
       );
     }
 
-    // ========== 발주등록 ==========
-    function PurchaseOrder() {
+    function PurchaseOrder({ editingPurchase = null, setEditingPurchase = () => {}, setCurrentView = () => {} }) {
       const vendors    = storage.get('vendors')    || [];
       const items      = storage.get('items')      || [];
       const steeltypes = storage.get('steeltypes') || [];
       const projects   = storage.get('projects')   || [];
       const warehouses = storage.get('warehouses') || [];
-
+      
+      // State 선언 (useEffect보다 먼저!)
       const emptyHeader = { vendor:'', steeltype:'', deliveryPlace:'', notes:'' };
       const [header, setHeader]   = useState(emptyHeader);
       const emptyLine = { itemCode:'', itemName:'', spec:'', project:'', T:0, W:0, L:0, qty:0, weight:0, unitPrice:0, amount:0, notes:'' };
       const [lines, setLines]     = useState([{...emptyLine}]);
       const [advance, setAdvance] = useState({ use: false, rate: 30 });
-      const [approver, setApprover] = useState('');  // 결재자 이메일 (Phase2에서 실제 사용)
-      const [saved, setSaved]     = useState(null);  // 저장 완료 후 표시
+      const [approver, setApprover] = useState('');
+      const [saved, setSaved]     = useState(null);
       const [attachments, setAttachments] = useState({ invoice: null, invoiceName: '', contract: null, contractName: '' });
-
+      const [approvers, setApprovers] = useState([]);
+      
+      useEffect(() => {
+        loadApprovers();
+        
+        // 수정 모드: editingPurchase가 있으면 데이터 채우기
+        if (editingPurchase) {
+          setHeader({
+            vendor: editingPurchase.vendor || '',
+            steeltype: editingPurchase.steeltype || '',
+            deliveryPlace: editingPurchase.deliveryPlace || '',
+            notes: editingPurchase.notes || ''
+          });
+          setLines(editingPurchase.lines || [{...emptyLine}]);
+          setAdvance(editingPurchase.advance || { use: false, rate: 30 });
+          setApprover(editingPurchase.approver || '');
+          setAttachments(editingPurchase.attachments || { invoice: null, invoiceName: '', contract: null, contractName: '' });
+        }
+      }, [editingPurchase]);
+      
+      const loadApprovers = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('approvers')
+            .select('*')
+            .is('deleted_at', null)
+            .eq('role', 'approver')
+            .order('name');
+          
+          if (error) throw error;
+          setApprovers(data || []);
+        } catch (err) {
+          console.error('결재자 로드 실패:', err);
+        }
+      };
+      
+      
       // 품목 선택 시 자동채우기
       const pickItem = (idx, code) => {
         const item = items.find(i => i.code === code);
@@ -1602,37 +2449,67 @@
           l.itemCode || l.T || l.W || l.L || Number(l.qty) > 0
         );
         if (validLines.length === 0) { alert('품목을 최소 1건 입력하세요'); return; }
+        
         const purchases = storage.get('purchases') || [];
-        const no = 'ORD-' + String(purchases.length + 1).padStart(6,'0');
-        const rec = {
-          id: no,
-          date: new Date().toISOString(),
-          ...header,
-          lines: validLines,
-          totalAmt,
-          advance: { use: advance.use, rate: advance.rate, amount: advanceAmt },
-          approver,
-          attachments: {
-            invoice: attachments.invoice || null,
-            invoiceName: attachments.invoiceName || '',
-            contract: attachments.contract || null,
-            contractName: attachments.contractName || ''
-          },
-          status: 'registered',
-          approvalStatus: 'none',
-          paymentStatus: 'none',
-          balancePaymentStatus: 'none',
-          approvalComment: '',
-          approvalDate: null,
-          approvalRequestDate: null,
-          paymentRequestDate: null,
-          paymentCompleteDate: null,
-          balanceRequestDate: null,
-          balanceCompleteDate: null
-        };
-        purchases.push(rec);
-        storage.set('purchases', purchases);
-        setSaved(rec);
+        
+        // 수정 모드인지 확인
+        if (editingPurchase) {
+          // 기존 발주 업데이트
+          const index = purchases.findIndex(p => p.id === editingPurchase.id);
+          if (index !== -1) {
+            purchases[index] = {
+              ...purchases[index],
+              ...header,
+              lines: validLines,
+              totalAmt,
+              advance: { use: advance.use, rate: advance.rate, amount: advanceAmt },
+              approver,
+              attachments: {
+                invoice: attachments.invoice || null,
+                invoiceName: attachments.invoiceName || '',
+                contract: attachments.contract || null,
+                contractName: attachments.contractName || ''
+              }
+            };
+            storage.set('purchases', purchases);
+            alert('✅ 수정 완료!');
+            setEditingPurchase(null); // 수정 모드 해제
+            setCurrentView('purchase-list'); // 발주내역으로 이동
+          }
+        } else {
+          // 신규 등록
+          const no = 'ORD-' + String(purchases.length + 1).padStart(6,'0');
+          const rec = {
+            id: no,
+            code: no,
+            date: new Date().toISOString(),
+            ...header,
+            lines: validLines,
+            totalAmt,
+            advance: { use: advance.use, rate: advance.rate, amount: advanceAmt },
+            approver,
+            attachments: {
+              invoice: attachments.invoice || null,
+              invoiceName: attachments.invoiceName || '',
+              contract: attachments.contract || null,
+              contractName: attachments.contractName || ''
+            },
+            status: 'registered',
+            approvalStatus: 'none',
+            paymentStatus: 'none',
+            balancePaymentStatus: 'none',
+            approvalComment: '',
+            approvalDate: null,
+            approvalRequestDate: null,
+            paymentRequestDate: null,
+            paymentCompleteDate: null,
+            balanceRequestDate: null,
+            balanceCompleteDate: null
+          };
+          purchases.push(rec);
+          storage.set('purchases', purchases);
+          setSaved(rec);
+        }
       };
 
       if (saved) {
@@ -1652,7 +2529,7 @@
               <button onClick={() => { setSaved(null); setHeader(emptyHeader); setLines([{...emptyLine}]); setAdvance({use:false,rate:30}); setApprover(''); setAttachments({invoice:null,invoiceName:'',contract:null,contractName:''}); }}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg btn-primary">+ 신규 발주</button>
               <button onClick={() => { setSaved(null); }}
-                className="bg-gray-200 hover:bg-gray-300 px-6 py-2 rounded-lg">발주내역으로</button>
+                className="bg-gray-200 hover:bg-gray-300 px-6 py-2 rounded-lg">발주등록으로</button>
             </div>
           </div>
         );
@@ -1660,9 +2537,27 @@
 
       return (
         <div className="space-y-5">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">발주등록</h1>
-            <p className="text-gray-500 mt-0.5 text-sm">원자재 발주 등록 및 선수금·결재 요청</p>
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">
+                {editingPurchase ? '발주수정' : '발주등록'}
+              </h1>
+              <p className="text-gray-500 mt-0.5 text-sm">
+                {editingPurchase ? `${editingPurchase.id} 수정` : '원자재 발주 등록 및 선수금·결재 요청'}
+              </p>
+            </div>
+            {editingPurchase && (
+              <button 
+                onClick={() => {
+                  if (confirm('수정을 취소하시겠습니까?')) {
+                    setEditingPurchase(null);
+                    setCurrentView('purchase-list');
+                  }
+                }}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+                ← 취소
+              </button>
+            )}
           </div>
 
           {/* 헤더 정보 */}
@@ -1857,19 +2752,19 @@
               )}
             </div>
 
-            {/* 결재자 지정 (등록된 결재자 드롭다운) */}
+            {/* 결재자 지정 (Supabase에서 로드) */}
             <div className="bg-white p-5 rounded-xl border shadow-sm">
-              <h3 className="text-sm font-bold text-gray-700 mb-3 border-b pb-2">결재자 지정 <span className="text-xs text-gray-400">(Phase2에서 실제 발송)</span></h3>
+              <h3 className="text-sm font-bold text-gray-700 mb-3 border-b pb-2">결재자 지정</h3>
               <div className="space-y-2">
                 <select value={approver} onChange={e => setApprover(e.target.value)}
                   className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50">
                   <option value="">-- 결재자 선택 --</option>
-                  {(storage.get('approvers') || []).filter(a => a.role === 'approver').map(a => (
+                  {approvers.map(a => (
                     <option key={a.id} value={a.email}>{a.name} ({a.email})</option>
                   ))}
                 </select>
                 {approver && (() => {
-                  const sel = (storage.get('approvers')||[]).find(a => a.email === approver);
+                  const sel = approvers.find(a => a.email === approver);
                   return sel ? (
                     <div className="bg-blue-50 border border-blue-200 rounded px-3 py-1.5 flex items-center gap-2">
                       <span className="text-blue-600 text-xs">✉️</span>
@@ -1878,7 +2773,7 @@
                     </div>
                   ) : null;
                 })()}
-                {(storage.get('approvers') || []).filter(a => a.role === 'approver').length === 0 && (
+                {approvers.length === 0 && (
                   <p className="text-xs text-red-500">⚠️ 등록된 결재자가 없습니다. 정보관리 → 결재자관리에서 먼저 등록하세요.</p>
                 )}
                 <p className="text-xs text-gray-400">💡 결재 요청 시 이 주소로 이메일 발송</p>
@@ -1989,10 +2884,13 @@
     }
 
     // ========== 발주내역 ==========
-    function PurchaseList() {
+    function PurchaseList({ setEditingPurchase = () => {}, setCurrentView = () => {} }) {
       const [purchases, setPurchases] = useState(storage.get('purchases') || []);
       const [selected, setSelected]   = useState(null); // 상세 클릭 건
       const vendors = storage.get('vendors') || [];
+      const items = storage.get('items') || [];
+      const projects = storage.get('projects') || [];
+      const warehouses = storage.get('warehouses') || [];
 
       const reload = () => setPurchases(storage.get('purchases') || []);
 
@@ -2006,14 +2904,49 @@
         setSelected(list.find(p => p.id === id) || null);
       };
 
-      // [결재 요청] → Phase1: status만 변경 (Phase2에서 실제 이메일 발송 + 첨부)
-      const requestApproval = (p) => {
-        if (!p.approver) { alert('결재자 이메일이 등록되지 않았습니다'); return; }
-        updatePurchase(p.id, { approvalStatus: 'pending', approvalRequestDate: new Date().toISOString() });
+      // [결재 요청] → 실제 이메일 발송
+      const requestApproval = async (p) => {
+        if (!p.approver) { 
+          alert('결재자 이메일이 등록되지 않았습니다'); 
+          return; 
+        }
+        
+        // 결재자 정보 가져오기
+        const approverInfo = (storage.get('approvers') || []).find(a => a.email === p.approver);
+        if (!approverInfo) {
+          alert('결재자 정보를 찾을 수 없습니다');
+          return;
+        }
+        
+        // 이메일 발송
+        const emailResult = await sendApprovalEmail(
+          {
+            order_no: p.code,
+            order_date: new Date(p.date).toLocaleDateString('ko-KR'),
+            vendor_name: p.vendorName || '업체명 없음',
+            total_amount: p.totalAmount || 0
+          },
+          approverInfo.email,
+          approverInfo.name
+        );
+        
+        if (!emailResult.success) {
+          alert('이메일 발송에 실패했습니다: ' + (emailResult.error?.text || '알 수 없는 오류'));
+          return;
+        }
+        
+        // 상태 업데이트
+        updatePurchase(p.id, { 
+          approvalStatus: 'pending', 
+          approvalRequestDate: new Date().toISOString() 
+        });
+        
         const att = [];
         if (p.attachments?.invoice) att.push('인보이스');
         if (p.attachments?.contract) att.push('계약서');
-        alert('결재 요청 완료!' + (att.length ? '\n자동 첨부: ' + att.join(', ') : '\n⚠️ 첨부파일 없음') + '\n(Phase2에서 실제 이메일 발송)');
+        
+        alert(`✅ 결재 요청 이메일 발송 완료!\n받는 사람: ${approverInfo.name} (${approverInfo.email})` + 
+              (att.length ? '\n첨부: ' + att.join(', ') : '\n⚠️ 첨부파일 없음'));
       };
 
       // [승낙] (Phase1 테스트용 — 실제로는 결재자가 이메일에서 클릭)
@@ -2055,6 +2988,13 @@
         updatePurchase(p.id, { balancePaymentStatus: 'completed', balanceCompleteDate: new Date().toISOString() });
       };
 
+      // [수정 시작] - 발주등록 페이지로 이동
+      const startEdit = (p) => {
+        setEditingPurchase(p);
+        setCurrentView('purchase-order');
+      };
+
+      
       // --- 엑셀/PDF/프린트 공통 데이터 ---
       const tableHeaders = ['발주번호','발주일','업체','강종','발주금액','선수금액','잔금액','결재상태','선수금 지급','잔금 송금','첨부'];
       const tableRows = purchases.map(p => [
@@ -2083,6 +3023,7 @@
         return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>{lbl}</span>;
       };
 
+      
       // ===== 상세 뷰 =====
       if (selected) {
         const p = selected;
@@ -2098,6 +3039,8 @@
                 {p.advance?.use && <PaymentBadge status={p.paymentStatus} />}
               </div>
               <div className="flex gap-2">
+                <button onClick={() => startEdit(p)} 
+                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">✏️ 수정</button>
                 <button onClick={() => printPage('발주서 - '+p.id, ['품번','품명','규격','프로젝트','수량','단가','금액'], p.lines.map(l => [l.itemCode,l.itemName,l.spec,'',fmt.num(l.qty),fmt.num(l.unitPrice),fmt.num(l.amount)]))}
                   className="px-3 py-1.5 rounded-lg border text-xs text-gray-600 hover:bg-gray-100">🖨️ 프린트</button>
                 <button onClick={() => excelDown([...p.lines.map(l => [l.itemCode,l.itemName,l.spec,fmt.num(l.qty),fmt.num(l.unitPrice),fmt.num(l.amount)])], ['품번','품명','규격','수량','단가','금액'], '발주서_'+p.id)}
